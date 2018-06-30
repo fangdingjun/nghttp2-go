@@ -21,6 +21,7 @@ static int on_header_callback(nghttp2_session *session,
                               size_t namelen, const uint8_t *value,
                               size_t valuelen, uint8_t flags, void *user_data)
 {
+    printf("on_header_callback\n");
     switch (frame->hd.type)
     {
     case NGHTTP2_HEADERS:
@@ -40,6 +41,7 @@ static int on_begin_headers_callback(nghttp2_session *session,
                                      const nghttp2_frame *frame,
                                      void *user_data)
 {
+    printf("on_begin_headers_callback\n");
     int stream_id = frame->hd.stream_id;
     switch (frame->hd.type)
     {
@@ -48,8 +50,8 @@ static int on_begin_headers_callback(nghttp2_session *session,
         {
             fprintf(stderr, "Response headers for stream ID=%d:\n",
                     frame->hd.stream_id);
+            OnBeginHeaderCallback(user_data, stream_id);
         }
-        OnBeginHeaderCallback(user_data, stream_id);
         break;
     }
     return 0;
@@ -58,15 +60,15 @@ static int on_begin_headers_callback(nghttp2_session *session,
 static int on_frame_recv_callback(nghttp2_session *session,
                                   const nghttp2_frame *frame, void *user_data)
 {
-
+    printf("on_frame_recv_callback\n");
     switch (frame->hd.type)
     {
     case NGHTTP2_HEADERS:
         if (frame->headers.cat == NGHTTP2_HCAT_RESPONSE)
         {
             fprintf(stderr, "All headers received\n");
+            OnFrameRecvCallback(user_data, frame->hd.stream_id);
         }
-        OnFrameRecvCallback(user_data, frame->hd.stream_id);
         break;
     }
     return 0;
@@ -82,6 +84,7 @@ static int on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
 static int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
                                     uint32_t error_code, void *user_data)
 {
+    OnStreamClose(user_data, stream_id);
     return 0;
 }
 
@@ -96,9 +99,18 @@ ssize_t data_source_read_callback(nghttp2_session *session, int32_t stream_id,
     }
     return ret;
 }
-
-void init_nghttp2_session(nghttp2_session *session, void *data)
+int on_error_callback(nghttp2_session *session, int lib_error_code,
+                      const char *msg, size_t len, void *user_data)
 {
+    //printf("errmsg %*s\n", msg, len);
+    printf("code: %d, error: %s\n", lib_error_code, nghttp2_strerror(lib_error_code));
+    return 0;
+}
+
+nghttp2_session *init_nghttp2_session(size_t data)
+{
+    int ret;
+    nghttp2_session *session;
     nghttp2_session_callbacks *callbacks;
 
     nghttp2_session_callbacks_new(&callbacks);
@@ -106,6 +118,7 @@ void init_nghttp2_session(nghttp2_session *session, void *data)
     nghttp2_session_callbacks_set_send_callback(callbacks, send_callback);
     nghttp2_session_callbacks_set_recv_callback(callbacks, recv_callback);
 
+    nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
     nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
                                                          on_frame_recv_callback);
 
@@ -121,9 +134,13 @@ void init_nghttp2_session(nghttp2_session *session, void *data)
     nghttp2_session_callbacks_set_on_begin_headers_callback(
         callbacks, on_begin_headers_callback);
 
-    nghttp2_session_client_new(&session, callbacks, data);
-
+    ret = nghttp2_session_client_new(&session, callbacks, (void *)((int *)(data)));
+    if (session == NULL)
+    {
+        printf("c init session failed: %s\n", nghttp2_strerror(ret));
+    }
     nghttp2_session_callbacks_del(callbacks);
+    return session;
 }
 
 int send_client_connection_header(nghttp2_session *session)

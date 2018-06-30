@@ -12,6 +12,7 @@ extern int OnDataRecv(void *, int, void *, size_t);
 extern int OnBeginHeaderCallback(void *, int);
 extern int OnHeaderCallback(void *, int, void *, int, void *, int);
 extern int OnFrameRecvCallback(void *, int);
+extern int OnStreamClose(void *, int);
 
 struct nv_array
 {
@@ -32,6 +33,6 @@ int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen
 
 int send_client_connection_header(nghttp2_session *session);
 
-void init_nghttp2_session(nghttp2_session *session, void *data);
+nghttp2_session * init_nghttp2_session(size_t data);
 
 #endif
