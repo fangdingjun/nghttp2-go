@@ -21,7 +21,7 @@ struct nv_array
 };
 
 void delete_nv_array(struct nv_array *a);
-nghttp2_data_provider *new_data_provider(void *data);
+nghttp2_data_provider *new_data_provider(size_t data);
 
 int nv_array_set(struct nv_array *a, int index,
                  char *name, char *value,
@@ -29,10 +29,12 @@ int nv_array_set(struct nv_array *a, int index,
 
 struct nv_array *new_nv_array(size_t n);
 
-int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen);
+int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen,
+                       nghttp2_data_provider *dp);
 
 int send_client_connection_header(nghttp2_session *session);
 
-nghttp2_session * init_nghttp2_session(size_t data);
+nghttp2_session *init_client_session(size_t data);
+nghttp2_session *init_server_session(size_t data);
 
 #endif

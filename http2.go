@@ -20,12 +20,13 @@ import (
 
 // Conn http2 connection
 type Conn struct {
-	session *C.nghttp2_session
-	conn    net.Conn
-	streams map[int]*Stream
-	lock    *sync.Mutex
-	errch   chan struct{}
-	err     error
+	session  *C.nghttp2_session
+	conn     net.Conn
+	streams  map[int]*Stream
+	lock     *sync.Mutex
+	errch    chan struct{}
+	err      error
+	isServer bool
 }
 
 // Stream http2 stream
@@ -36,10 +37,14 @@ type Stream struct {
 	// application read data from stream
 	r *io.PipeReader
 	// recv stream data from session
-	w     *io.PipeWriter
-	res   *http.Response
-	resch chan *http.Response
-	errch chan error
+	w      *io.PipeWriter
+	res    *http.Response
+	resch  chan *http.Response
+	errch  chan error
+	closed bool
+}
+
+type Request struct {
 }
 
 type dataProvider struct {
@@ -49,22 +54,43 @@ type dataProvider struct {
 	w io.Writer
 }
 
-// NewConn create http2 connection
-func NewConn(c net.Conn) (*Conn, error) {
+// NewClientConn create http2 client
+func NewClientConn(c net.Conn) (*Conn, error) {
 	conn := &Conn{
-		conn: c, streams: make(map[int]*Stream), lock: new(sync.Mutex),
+		conn: c, streams: make(map[int]*Stream),
+		lock:  new(sync.Mutex),
 		errch: make(chan struct{}),
 	}
-	conn.session = C.init_nghttp2_session(C.size_t(int(uintptr(unsafe.Pointer(conn)))))
+	conn.session = C.init_client_session(
+		C.size_t(int(uintptr(unsafe.Pointer(conn)))))
 	if conn.session == nil {
 		return nil, fmt.Errorf("init session failed")
 	}
 	ret := C.send_client_connection_header(conn.session)
 	if int(ret) < 0 {
-		log.Printf("submit settings error: %s", C.GoString(C.nghttp2_strerror(ret)))
+		log.Printf("submit settings error: %s",
+			C.GoString(C.nghttp2_strerror(ret)))
 	}
 	go conn.run()
 	return conn, nil
+}
+
+// NewServerConn create http2 server
+func NewServerConn(c net.Conn) (*Conn, error) {
+	conn := &Conn{
+		conn: c, streams: make(map[int]*Stream),
+		lock:     new(sync.Mutex),
+		errch:    make(chan struct{}),
+		isServer: true,
+	}
+	conn.session = C.init_server_session(
+		C.size_t(int(uintptr(unsafe.Pointer(conn)))))
+	if conn.session == nil {
+		return nil, fmt.Errorf("init session failed")
+	}
+	go conn.run()
+	return conn, nil
+
 }
 
 func (c *Conn) onDataRecv(buf []byte, streamID int) {
@@ -104,6 +130,7 @@ func (c *Conn) Close() error {
 	for _, s := range c.streams {
 		s.Close()
 	}
+	C.nghttp2_session_terminate_session(c.session, 0)
 	C.nghttp2_session_del(c.session)
 	close(c.errch)
 	c.conn.Close()
@@ -116,31 +143,56 @@ func (c *Conn) run() {
 	var delay = 50
 	var ret C.int
 
+	datach := make(chan []byte)
+	errch := make(chan error)
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := c.conn.Read(buf)
+			if err != nil {
+				errch <- err
+				break
+			}
+			datach <- buf[:n]
+		}
+	}()
+
 loop:
 	for {
 		select {
 		case <-c.errch:
 			break loop
+		case err := <-errch:
+			c.err = err
+			break loop
 		default:
 		}
 
-		wantRead = int(C.nghttp2_session_want_read(c.session))
 		wantWrite = int(C.nghttp2_session_want_write(c.session))
 		if wantWrite != 0 {
 			ret = C.nghttp2_session_send(c.session)
 			if int(ret) < 0 {
-				c.err = fmt.Errorf("sesion send error: %s", C.GoString(C.nghttp2_strerror(ret)))
+				c.err = fmt.Errorf("sesion send error: %s",
+					C.GoString(C.nghttp2_strerror(ret)))
 				log.Println(c.err)
 				break
 			}
 		}
-		if wantRead != 0 {
-			ret = C.nghttp2_session_recv(c.session)
-			if int(ret) < 0 {
-				c.err = fmt.Errorf("sesion recv error: %s", C.GoString(C.nghttp2_strerror(ret)))
+
+		wantRead = int(C.nghttp2_session_want_read(c.session))
+		select {
+		case d := <-datach:
+			d1 := C.CBytes(d)
+			ret1 := C.nghttp2_session_mem_recv(c.session,
+				(*C.uchar)(d1), C.size_t(int(len(d))))
+			if int(ret1) < 0 {
+				c.err = fmt.Errorf("sesion recv error: %s",
+					C.GoString(C.nghttp2_strerror(ret)))
 				log.Println(c.err)
-				break
+				break loop
 			}
+		default:
 		}
 
 		// make delay when no data read/write
@@ -152,10 +204,21 @@ loop:
 	}
 }
 
-// NewRequest create a new http2 stream
-func (c *Conn) NewRequest(req *http.Request) (*http.Response, error) {
+// AcceptRequest get a request from session
+// this block until a request is avaliable,
+// server only
+func (c *Conn) AcceptRequest() (req *Request, err error) {
+	return nil, nil
+}
+
+// CreateRequest submit a request and return a http.Response, client only
+func (c *Conn) CreateRequest(req *http.Request) (*http.Response, error) {
 	if c.err != nil {
 		return nil, c.err
+	}
+
+	if c.isServer {
+		return nil, fmt.Errorf("only client can create new request")
 	}
 
 	nvIndex := 0
@@ -179,6 +242,7 @@ func (c *Conn) NewRequest(req *http.Request) (*http.Response, error) {
 		if strings.ToLower(k) == "host" {
 			continue
 		}
+		//log.Printf("header %s: %s", k, v)
 		setNvArray(nva, nvIndex, strings.Title(k), v[0], 0)
 		nvIndex++
 	}
@@ -187,12 +251,13 @@ func (c *Conn) NewRequest(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
 		dp, cdp = newDataProvider(req.Body, nil)
 	}
-	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex+1))
+	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
 	C.delete_nv_array(nva)
 	if int(streamID) < 0 {
-		return nil, fmt.Errorf("submit request error: %s", C.GoString(C.nghttp2_strerror(streamID)))
+		return nil, fmt.Errorf("submit request error: %s",
+			C.GoString(C.nghttp2_strerror(streamID)))
 	}
-	log.Println("stream id ", int(streamID))
+	//log.Println("stream id ", int(streamID))
 	r, w := io.Pipe()
 	s := &Stream{
 		streamID: int(streamID),
@@ -216,14 +281,15 @@ func (c *Conn) NewRequest(req *http.Request) (*http.Response, error) {
 	//return nil, fmt.Errorf("unknown error")
 }
 
-func setNvArray(a *C.struct_nv_array, index int, name, value string, flags int) {
+func setNvArray(a *C.struct_nv_array, index int,
+	name, value string, flags int) {
 	cname := C.CString(name)
 	cvalue := C.CString(value)
 	cnamelen := C.size_t(len(name))
 	cvaluelen := C.size_t(len(value))
 	cflags := C.int(flags)
-	defer C.free(unsafe.Pointer(cname))
-	defer C.free(unsafe.Pointer(cvalue))
+	//defer C.free(unsafe.Pointer(cname))
+	//defer C.free(unsafe.Pointer(cvalue))
 	C.nv_array_set(a, C.int(index), cname,
 		cvalue, cnamelen, cvaluelen, cflags)
 }
@@ -239,9 +305,10 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 	return dp.w.Write(buf)
 }
 
-func newDataProvider(r io.Reader, w io.Writer) (*dataProvider, *C.nghttp2_data_provider) {
+func newDataProvider(r io.Reader, w io.Writer) (
+	*dataProvider, *C.nghttp2_data_provider) {
 	dp := &dataProvider{r, w}
-	cdp := C.new_data_provider(unsafe.Pointer(dp))
+	cdp := C.new_data_provider(C.size_t(uintptr(unsafe.Pointer(dp))))
 	return dp, cdp
 }
 
@@ -279,23 +346,36 @@ func (s *Stream) onHeader(name, value string) {
 func (s *Stream) onFrameRecv() {
 	s.res.Body = s
 	s.resch <- s.res
+	//log.Println("stream frame recv")
 }
 
 // Close close the stream
 func (s *Stream) Close() error {
-	select {
-	case s.errch <- fmt.Errorf("stream closed"):
+	if s.closed {
+		return nil
 	}
+	err := fmt.Errorf("stream closed")
+	//log.Println("close stream")
+	select {
+	case s.errch <- err:
+	default:
+	}
+	//log.Println("close stream resch")
 	close(s.resch)
+	//log.Println("close stream errch")
 	close(s.errch)
-	s.w.Close()
+	//log.Println("close pipe w")
+	s.w.CloseWithError(err)
+	//log.Println("close stream done")
+	s.closed = true
 	return nil
 }
 
 // DataSourceRead callback function for data read from data provider source
 //export DataSourceRead
-func DataSourceRead(ptr unsafe.Pointer, buf unsafe.Pointer, length C.size_t) C.ssize_t {
-	log.Println("data source read")
+func DataSourceRead(ptr unsafe.Pointer,
+	buf unsafe.Pointer, length C.size_t) C.ssize_t {
+	//log.Println("data source read")
 	dp := (*dataProvider)(ptr)
 	gobuf := make([]byte, int(length))
 	n, err := dp.Read(gobuf)
@@ -313,8 +393,9 @@ func DataSourceRead(ptr unsafe.Pointer, buf unsafe.Pointer, length C.size_t) C.s
 
 // OnDataRecv callback function for data frame received
 //export OnDataRecv
-func OnDataRecv(ptr unsafe.Pointer, streamID C.int, buf unsafe.Pointer, length C.size_t) C.int {
-	log.Println("on data recv")
+func OnDataRecv(ptr unsafe.Pointer, streamID C.int,
+	buf unsafe.Pointer, length C.size_t) C.int {
+	//log.Println("on data recv")
 	conn := (*Conn)(ptr)
 	gobuf := C.GoBytes(buf, C.int(length))
 	conn.onDataRecv(gobuf, int(streamID))
@@ -324,39 +405,41 @@ func OnDataRecv(ptr unsafe.Pointer, streamID C.int, buf unsafe.Pointer, length C
 // DataRead callback function for session wants read data from peer
 //export DataRead
 func DataRead(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
-	log.Println("data read")
+	//log.Println("data read req", int(size))
 	conn := (*Conn)(ptr)
 	buf := make([]byte, int(size))
-	log.Println(conn.conn.RemoteAddr())
+	//log.Println(conn.conn.RemoteAddr())
 	n, err := conn.conn.Read(buf)
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return -1
 	}
-	log.Println("read from network ", n)
+	cbuf := C.CBytes(buf)
+	//log.Println("read from network ", n, buf[:n])
+	C.memcpy(data, cbuf, C.size_t(n))
 	return C.ssize_t(n)
 }
 
 // DataWrite callback function for session wants send data to peer
 //export DataWrite
 func DataWrite(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
-	log.Println("data write")
+	//log.Println("data write req ", int(size))
 	conn := (*Conn)(ptr)
 	buf := C.GoBytes(data, C.int(size))
-	log.Println(conn.conn.RemoteAddr())
+	//log.Println(conn.conn.RemoteAddr())
 	n, err := conn.conn.Write(buf)
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return -1
 	}
-	log.Println("write data to network ", n)
+	//log.Println("write data to network ", n)
 	return C.ssize_t(n)
 }
 
 // OnBeginHeaderCallback callback function for response
 //export OnBeginHeaderCallback
 func OnBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	log.Println("begin header")
+	//log.Println("begin header")
 	conn := (*Conn)(ptr)
 	conn.onBeginHeader(int(streamID))
 	return 0
@@ -367,7 +450,7 @@ func OnBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 func OnHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
 	value unsafe.Pointer, valuelen C.int) C.int {
-	log.Println("header")
+	//log.Println("header")
 	conn := (*Conn)(ptr)
 	goname := C.GoBytes(name, namelen)
 	govalue := C.GoBytes(value, valuelen)
@@ -378,7 +461,7 @@ func OnHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 // OnFrameRecvCallback callback function for begion to recv data
 //export OnFrameRecvCallback
 func OnFrameRecvCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	log.Println("frame recv")
+	//log.Println("frame recv")
 	conn := (*Conn)(ptr)
 	conn.onFrameRecv(int(streamID))
 	return 0
@@ -387,7 +470,7 @@ func OnFrameRecvCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 // OnStreamClose callback function for stream close
 //export OnStreamClose
 func OnStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
-	log.Println("stream close")
+	//log.Println("stream close")
 	conn := (*Conn)(ptr)
 	conn.onStreamClose(int(streamID))
 	return 0
