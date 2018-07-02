@@ -5,14 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 
-extern ssize_t DataRead(void *, void *data, size_t);
-extern ssize_t DataWrite(void *, void *data, size_t);
+extern ssize_t ClientDataRecv(void *, void *data, size_t);
+extern ssize_t ClientDataSend(void *, void *data, size_t);
 extern ssize_t DataSourceRead(void *, void *, size_t);
-extern int OnDataRecv(void *, int, void *, size_t);
-extern int OnBeginHeaderCallback(void *, int);
-extern int OnHeaderCallback(void *, int, void *, int, void *, int);
-extern int OnFrameRecvCallback(void *, int);
-extern int OnStreamClose(void *, int);
+extern int OnClientDataRecv(void *, int, void *, size_t);
+extern int OnClientBeginHeaderCallback(void *, int);
+extern int OnClientHeaderCallback(void *, int, void *, int, void *, int);
+extern int OnClientFrameRecvCallback(void *, int);
+extern int OnClientStreamClose(void *, int);
 
 struct nv_array
 {

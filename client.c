@@ -3,20 +3,20 @@
 #define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
 
 // send_callback send data to network
-static ssize_t send_callback(nghttp2_session *session, const uint8_t *data,
+static ssize_t client_send_callback(nghttp2_session *session, const uint8_t *data,
                              size_t length, int flags, void *user_data)
 {
-    return DataWrite(user_data, (void *)data, length);
+    return ClientDataSend(user_data, (void *)data, length);
 }
 
 // recv_callback read data from network
-static ssize_t recv_callback(nghttp2_session *session, uint8_t *buf,
+static ssize_t client_recv_callback(nghttp2_session *session, uint8_t *buf,
                              size_t length, int flags, void *user_data)
 {
-    return DataRead(user_data, (void *)buf, length);
+    return ClientDataRecv(user_data, (void *)buf, length);
 }
 
-static int on_header_callback(nghttp2_session *session,
+static int on_client_header_callback(nghttp2_session *session,
                               const nghttp2_frame *frame, const uint8_t *name,
                               size_t namelen, const uint8_t *value,
                               size_t valuelen, uint8_t flags, void *user_data)
@@ -29,7 +29,7 @@ static int on_header_callback(nghttp2_session *session,
         {
             /* Print response headers for the initiated request. */
             //print_header(stderr, name, namelen, value, valuelen);
-            OnHeaderCallback(user_data, frame->hd.stream_id,
+            OnClientHeaderCallback(user_data, frame->hd.stream_id,
                              (void *)name, namelen, (void *)value, valuelen);
             break;
         }
@@ -37,7 +37,7 @@ static int on_header_callback(nghttp2_session *session,
     return 0;
 }
 
-static int on_begin_headers_callback(nghttp2_session *session,
+static int on_client_begin_headers_callback(nghttp2_session *session,
                                      const nghttp2_frame *frame,
                                      void *user_data)
 {
@@ -50,7 +50,7 @@ static int on_begin_headers_callback(nghttp2_session *session,
         {
             //fprintf(stderr, "Response headers for stream ID=%d:\n",
             //        frame->hd.stream_id);
-            OnBeginHeaderCallback(user_data, stream_id);
+            OnClientBeginHeaderCallback(user_data, stream_id);
         }
         break;
     }
@@ -67,7 +67,7 @@ int on_invalid_frame_recv_callback(nghttp2_session *session,
     return 0;
 }
 
-static int on_frame_send_callback(nghttp2_session *session,
+static int on_client_frame_send_callback(nghttp2_session *session,
                                   const nghttp2_frame *frame, void *user_data)
 {
     size_t i;
@@ -103,7 +103,7 @@ static int on_frame_send_callback(nghttp2_session *session,
     return 0;
 }
 
-static int on_frame_recv_callback(nghttp2_session *session,
+static int on_client_frame_recv_callback(nghttp2_session *session,
                                   const nghttp2_frame *frame, void *user_data)
 {
     //printf("on_frame_recv_callback %d\n", frame->hd.type);
@@ -113,7 +113,7 @@ static int on_frame_recv_callback(nghttp2_session *session,
         if (frame->headers.cat == NGHTTP2_HCAT_RESPONSE)
         {
             //fprintf(stderr, "All headers received\n");
-            OnFrameRecvCallback(user_data, frame->hd.stream_id);
+            OnClientFrameRecvCallback(user_data, frame->hd.stream_id);
         }
         break;
     case NGHTTP2_RST_STREAM:
@@ -126,17 +126,17 @@ static int on_frame_recv_callback(nghttp2_session *session,
     return 0;
 }
 
-static int on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
+static int on_client_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
                                        int32_t stream_id, const uint8_t *data,
                                        size_t len, void *user_data)
 {
-    return OnDataRecv(user_data, stream_id, (void *)data, len);
+    return OnClientDataRecv(user_data, stream_id, (void *)data, len);
 }
 
-static int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
+static int on_client_stream_close_callback(nghttp2_session *session, int32_t stream_id,
                                     uint32_t error_code, void *user_data)
 {
-    OnStreamClose(user_data, stream_id);
+    OnClientStreamClose(user_data, stream_id);
     return 0;
 }
 
@@ -159,28 +159,28 @@ int on_error_callback(nghttp2_session *session, int lib_error_code,
     return 0;
 }
 
-void init_callbacks(nghttp2_session_callbacks *callbacks)
+void init_client_callbacks(nghttp2_session_callbacks *callbacks)
 {
-    nghttp2_session_callbacks_set_send_callback(callbacks, send_callback);
-    nghttp2_session_callbacks_set_recv_callback(callbacks, recv_callback);
+    nghttp2_session_callbacks_set_send_callback(callbacks, client_send_callback);
+    nghttp2_session_callbacks_set_recv_callback(callbacks, client_recv_callback);
 
     //nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
     nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks, on_invalid_frame_recv_callback);
     nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
-                                                         on_frame_recv_callback);
+                                                         on_client_frame_recv_callback);
 
-    nghttp2_session_callbacks_set_on_frame_send_callback(callbacks, on_frame_send_callback);
+    nghttp2_session_callbacks_set_on_frame_send_callback(callbacks, on_client_frame_send_callback);
     nghttp2_session_callbacks_set_on_data_chunk_recv_callback(
-        callbacks, on_data_chunk_recv_callback);
+        callbacks, on_client_data_chunk_recv_callback);
 
     nghttp2_session_callbacks_set_on_stream_close_callback(
-        callbacks, on_stream_close_callback);
+        callbacks, on_client_stream_close_callback);
 
     nghttp2_session_callbacks_set_on_header_callback(callbacks,
-                                                     on_header_callback);
+                                                     on_client_header_callback);
 
     nghttp2_session_callbacks_set_on_begin_headers_callback(
-        callbacks, on_begin_headers_callback);
+        callbacks, on_client_begin_headers_callback);
 }
 
 nghttp2_session *init_client_session(size_t data)
@@ -189,23 +189,8 @@ nghttp2_session *init_client_session(size_t data)
     nghttp2_session *session;
     nghttp2_session_callbacks *callbacks;
     nghttp2_session_callbacks_new(&callbacks);
-    init_callbacks(callbacks);
+    init_client_callbacks(callbacks);
     ret = nghttp2_session_client_new(&session, callbacks, (void *)((int *)(data)));
-    if (session == NULL)
-    {
-        printf("c init session failed: %s\n", nghttp2_strerror(ret));
-    }
-    return session;
-}
-
-nghttp2_session *init_server_session(size_t data)
-{
-    int ret;
-    nghttp2_session *session;
-    nghttp2_session_callbacks *callbacks;
-    nghttp2_session_callbacks_new(&callbacks);
-    init_callbacks(callbacks);
-    ret = nghttp2_session_server_new(&session, callbacks, (void *)((int *)(data)));
     if (session == NULL)
     {
         printf("c init session failed: %s\n", nghttp2_strerror(ret));
