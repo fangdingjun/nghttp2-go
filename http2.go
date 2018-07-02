@@ -147,7 +147,7 @@ func (c *Conn) run() {
 	errch := make(chan error)
 
 	go func() {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 16*1024)
 		for {
 			n, err := c.conn.Read(buf)
 			if err != nil {
@@ -186,6 +186,7 @@ loop:
 			d1 := C.CBytes(d)
 			ret1 := C.nghttp2_session_mem_recv(c.session,
 				(*C.uchar)(d1), C.size_t(int(len(d))))
+			C.free(d1)
 			if int(ret1) < 0 {
 				c.err = fmt.Errorf("sesion recv error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))

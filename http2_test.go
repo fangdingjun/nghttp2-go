@@ -32,7 +32,9 @@ func TestHttp2Client(t *testing.T) {
 	param.Add("e", "b")
 	param.Add("f", "d")
 	data := bytes.NewReader([]byte(param.Encode()))
-	req, _ := http.NewRequest("POST", "https://www.simicloud.com/media/httpbin/post?a=b&c=d", data)
+	req, _ := http.NewRequest("POST",
+		"https://www.simicloud.com/media/httpbin/post?a=b&c=d",
+		data)
 	log.Printf("%+v", req)
 	req.Header.Set("accept", "*/*")
 	req.Header.Set("user-agent", "go-nghttp2/1.0")
@@ -42,5 +44,14 @@ func TestHttp2Client(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Write(os.Stderr)
+
+	req, _ = http.NewRequest("GET",
+		"https://www.simicloud.com/media/httpbin/get?a=b&c=d", nil)
+	res, err = h2conn.CreateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Write(os.Stderr)
+
 	log.Println("end")
 }

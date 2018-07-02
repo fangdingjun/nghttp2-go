@@ -164,7 +164,7 @@ void init_callbacks(nghttp2_session_callbacks *callbacks)
     nghttp2_session_callbacks_set_send_callback(callbacks, send_callback);
     nghttp2_session_callbacks_set_recv_callback(callbacks, recv_callback);
 
-    nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
+    //nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
     nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks, on_invalid_frame_recv_callback);
     nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
                                                          on_frame_recv_callback);
@@ -190,7 +190,7 @@ nghttp2_session *init_client_session(size_t data)
     nghttp2_session_callbacks *callbacks;
     nghttp2_session_callbacks_new(&callbacks);
     init_callbacks(callbacks);
-    ret = nghttp2_session_server_new(&session, callbacks, (void *)((int *)(data)));
+    ret = nghttp2_session_client_new(&session, callbacks, (void *)((int *)(data)));
     if (session == NULL)
     {
         printf("c init session failed: %s\n", nghttp2_strerror(ret));
