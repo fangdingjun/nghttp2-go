@@ -1,6 +1,5 @@
 #include "_nghttp2.h"
 
-#define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
 
 // send_callback send data to network
 static ssize_t client_send_callback(nghttp2_session *session, const uint8_t *data,
@@ -113,7 +112,7 @@ static int on_client_frame_recv_callback(nghttp2_session *session,
         if (frame->headers.cat == NGHTTP2_HCAT_RESPONSE)
         {
             //fprintf(stderr, "All headers received\n");
-            OnClientFrameRecvCallback(user_data, frame->hd.stream_id);
+            OnClientHeadersDoneCallback(user_data, frame->hd.stream_id);
         }
         break;
     case NGHTTP2_RST_STREAM:
@@ -140,7 +139,7 @@ static int on_client_stream_close_callback(nghttp2_session *session, int32_t str
     return 0;
 }
 
-ssize_t data_source_read_callback(nghttp2_session *session, int32_t stream_id,
+static ssize_t data_source_read_callback(nghttp2_session *session, int32_t stream_id,
                                   uint8_t *buf, size_t length, uint32_t *data_flags,
                                   nghttp2_data_source *source, void *user_data)
 {
