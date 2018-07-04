@@ -178,7 +178,7 @@ func TestHttp2Handler(t *testing.T) {
 	testdata := "asc fasdf32ddfasfff\r\nassdf312313"
 	addr := l.Addr().String()
 	go func() {
-		http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/test2", func(w http.ResponseWriter, r *http.Request) {
 			hdr := w.Header()
 			hdr.Set("content-type", "text/plain")
 			hdr.Set("aa", "bb")
@@ -201,7 +201,7 @@ func TestHttp2Handler(t *testing.T) {
 			},
 		},
 	}
-	u := fmt.Sprintf("https://%s/test", addr)
+	u := fmt.Sprintf("https://%s/test2", addr)
 	resp, err := client.Get(u)
 	if err != nil {
 		t.Fatal(err)
