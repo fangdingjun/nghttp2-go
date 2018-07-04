@@ -27,8 +27,8 @@ type dataProvider struct {
 func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
-	n, err = dp.buf.Read(buf)
 
+	n, err = dp.buf.Read(buf)
 	if err != nil && !dp.closed {
 		return 0, errAgain
 	}
@@ -95,11 +95,8 @@ func (bp *bodyProvider) Write(buf []byte) (int, error) {
 
 // Close end to provide data
 func (bp *bodyProvider) Close() error {
-	/*
-		if c, ok := bp.w.(io.Closer); ok{
-			return c.Close()
-		}
-	*/
+	bp.lock.Lock()
+	defer bp.lock.Unlock()
 	bp.closed = true
 	return nil
 }
