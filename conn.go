@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -51,7 +50,8 @@ func NewClientConn(c net.Conn) (*ClientConn, error) {
 	}
 	ret := C.send_client_connection_header(conn.session)
 	if int(ret) < 0 {
-		log.Printf("submit settings error: %s",
+		conn.Close()
+		return nil, fmt.Errorf("submit settings error: %s",
 			C.GoString(C.nghttp2_strerror(ret)))
 	}
 	go conn.run()
@@ -61,7 +61,7 @@ func NewClientConn(c net.Conn) (*ClientConn, error) {
 func (c *ClientConn) onDataRecv(buf []byte, streamID int) {
 	s := c.streams[streamID]
 	if s.res.Body == nil {
-		log.Println("empty body")
+		//log.Println("empty body")
 		return
 	}
 
@@ -195,7 +195,7 @@ loop:
 			if int(ret) < 0 {
 				c.err = fmt.Errorf("sesion send error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))
-				log.Println(c.err)
+				//log.Println(c.err)
 				break
 			}
 		}
@@ -210,7 +210,7 @@ loop:
 			if int(ret1) < 0 {
 				c.err = fmt.Errorf("sesion recv error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))
-				log.Println(c.err)
+				//log.Println(c.err)
 				break loop
 			}
 		default:
@@ -350,8 +350,8 @@ func NewServerConn(c net.Conn, handler http.Handler) (*ServerConn, error) {
 	//log.Println("send server connection header")
 	ret := C.send_server_connection_header(conn.session)
 	if int(ret) < 0 {
-		log.Println(C.GoString(C.nghttp2_strerror(ret)))
-		return nil, fmt.Errorf("send connection header failed")
+		return nil, fmt.Errorf(C.GoString(C.nghttp2_strerror(ret)))
+		//return nil, fmt.Errorf("send connection header failed")
 	}
 	//go conn.run()
 	return conn, nil
@@ -429,7 +429,7 @@ loop:
 			if int(ret) < 0 {
 				c.err = fmt.Errorf("sesion send error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))
-				log.Println(c.err)
+				//log.Println(c.err)
 				break
 			}
 		}
@@ -444,7 +444,7 @@ loop:
 			if int(ret1) < 0 {
 				c.err = fmt.Errorf("sesion recv error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))
-				log.Println(c.err)
+				//log.Println(c.err)
 				break loop
 			}
 		default:
