@@ -7,18 +7,18 @@
 
 #define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
 
-extern ssize_t ClientDataRecv(void *, void *data, size_t);
-extern ssize_t ClientDataSend(void *, void *data, size_t);
-extern ssize_t DataSourceRead(void *, void *, size_t);
-extern int OnClientDataRecv(void *, int, void *, size_t);
+extern ssize_t OnClientDataRecvCallback(void *, void *data, size_t);
+extern ssize_t OnClientDataSendCallback(void *, void *data, size_t);
+extern ssize_t OnDataSourceReadCallback(void *, void *, size_t);
+extern int OnClientDataChunkRecv(void *, int, void *, size_t);
 extern int OnClientBeginHeaderCallback(void *, int);
 extern int OnClientHeaderCallback(void *, int, void *, int, void *, int);
 extern int OnClientHeadersDoneCallback(void *, int);
 extern int OnClientStreamClose(void *, int);
 
-extern ssize_t ServerDataRecv(void *, void *data, size_t);
-extern ssize_t ServerDataSend(void *, void *data, size_t);
-extern int OnServerDataRecv(void *, int, void *, size_t);
+extern ssize_t OnServerDataRecvCallback(void *, void *data, size_t);
+extern ssize_t OnServerDataSendCallback(void *, void *data, size_t);
+extern int OnServerDataChunkRecv(void *, int, void *, size_t);
 extern int OnServerBeginHeaderCallback(void *, int);
 extern int OnServerHeaderCallback(void *, int, void *, int, void *, int);
 extern int OnServerStreamEndCallback(void *, int);

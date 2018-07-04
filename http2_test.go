@@ -45,6 +45,9 @@ func TestHttp2Client(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expect %d, got %d", http.StatusOK, res.StatusCode)
+	}
 	res.Write(os.Stderr)
 
 	req, _ = http.NewRequest("GET",
@@ -52,6 +55,9 @@ func TestHttp2Client(t *testing.T) {
 	res, err = h2conn.CreateRequest(req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expect %d, got %d", http.StatusOK, res.StatusCode)
 	}
 	res.Write(os.Stderr)
 
