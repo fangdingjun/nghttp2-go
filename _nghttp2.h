@@ -5,14 +5,26 @@
 #include <stdio.h>
 #include <string.h>
 
+#define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
+
 extern ssize_t ClientDataRecv(void *, void *data, size_t);
 extern ssize_t ClientDataSend(void *, void *data, size_t);
 extern ssize_t DataSourceRead(void *, void *, size_t);
 extern int OnClientDataRecv(void *, int, void *, size_t);
 extern int OnClientBeginHeaderCallback(void *, int);
 extern int OnClientHeaderCallback(void *, int, void *, int, void *, int);
-extern int OnClientFrameRecvCallback(void *, int);
+extern int OnClientHeadersDoneCallback(void *, int);
 extern int OnClientStreamClose(void *, int);
+
+extern ssize_t ServerDataRecv(void *, void *data, size_t);
+extern ssize_t ServerDataSend(void *, void *data, size_t);
+extern int OnServerDataRecv(void *, int, void *, size_t);
+extern int OnServerBeginHeaderCallback(void *, int);
+extern int OnServerHeaderCallback(void *, int, void *, int, void *, int);
+extern int OnServerStreamEndCallback(void *, int);
+extern int OnServerHeadersDoneCallback(void *, int);
+extern int OnServerStreamClose(void *, int);
+int send_server_connection_header(nghttp2_session *session);
 
 struct nv_array
 {

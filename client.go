@@ -52,16 +52,11 @@ type ClientStream struct {
 }
 
 type dataProvider struct {
-	// drain the data
-	r io.Reader
-	// provider the data
-	w        io.Writer
-	datach   chan []byte
-	errch    chan error
 	buf      *bytes.Buffer
-	run      bool
-	streamID int
+	closed   bool
+	lock     *sync.Mutex
 	session  *C.nghttp2_session
+	streamID int
 }
 
 // NewClientConn create http2 client
@@ -247,7 +242,11 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	var dp *dataProvider
 	var cdp *C.nghttp2_data_provider
 	if req.Body != nil {
-		dp, cdp = newDataProvider(req.Body, nil)
+		dp, cdp = newDataProvider()
+		go func() {
+			io.Copy(dp, req.Body)
+			dp.Close()
+		}()
 	}
 	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
 	if dp != nil {
@@ -298,40 +297,15 @@ func setNvArray(a *C.struct_nv_array, index int,
 		cvalue, cnamelen, cvaluelen, cflags)
 }
 
-func (dp *dataProvider) start() {
-	buf := make([]byte, 4096)
-	for {
-		n, err := dp.r.Read(buf)
-		if err != nil {
-			dp.errch <- err
-			break
-		}
-		dp.datach <- buf[:n]
-		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
-	}
-}
-
 // Read read from data provider
 // this emulate a unblocking reading
 // if data is not avaliable return errAgain
 func (dp *dataProvider) Read(buf []byte) (n int, err error) {
-	if !dp.run {
-		go dp.start()
-		dp.run = true
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	select {
-	case err := <-dp.errch:
-		//log.Println("d err ", err)
-		return 0, err
-	case b := <-dp.datach:
-		dp.buf.Write(b)
-	default:
-	}
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
 	n, err = dp.buf.Read(buf)
-	if err != nil {
-		//log.Println(err)
+
+	if err != nil && !dp.closed {
 		return 0, errAgain
 	}
 	return
@@ -339,19 +313,25 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 
 // Write provider data for data provider
 func (dp *dataProvider) Write(buf []byte) (n int, err error) {
-	if dp.w == nil {
-		return 0, fmt.Errorf("write not supported")
-	}
-	return dp.w.Write(buf)
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
+	C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+	return dp.buf.Write(buf)
 }
 
-func newDataProvider(r io.Reader, w io.Writer) (
+// Close
+func (dp *dataProvider) Close() error {
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
+	dp.closed = true
+	C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+	return nil
+}
+func newDataProvider() (
 	*dataProvider, *C.nghttp2_data_provider) {
 	dp := &dataProvider{
-		r: r, w: w,
-		errch:  make(chan error),
-		datach: make(chan []byte),
-		buf:    new(bytes.Buffer),
+		buf:  new(bytes.Buffer),
+		lock: new(sync.Mutex),
 	}
 	cdp := C.new_data_provider(C.size_t(uintptr(unsafe.Pointer(dp))))
 	return dp, cdp
@@ -399,7 +379,7 @@ func (s *ClientStream) Close() error {
 	if s.closed {
 		return nil
 	}
-	err := fmt.Errorf("stream closed")
+	err := io.EOF
 	//log.Println("close stream")
 	select {
 	case s.errch <- err:
@@ -412,6 +392,9 @@ func (s *ClientStream) Close() error {
 	//log.Println("close pipe w")
 	s.w.CloseWithError(err)
 	//log.Println("close stream done")
+	if s.dp != nil {
+		s.dp.Close()
+	}
 	s.closed = true
 	return nil
 }
