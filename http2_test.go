@@ -51,7 +51,8 @@ func TestHttp2Client(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expect %d, got %d", http.StatusOK, res.StatusCode)
 	}
-	res.Write(os.Stderr)
+	log.Printf("%+v", res)
+	//res.Write(os.Stderr)
 
 	req, _ = http.NewRequest("GET",
 		"https://www.simicloud.com/media/httpbin/get?a=b&c=d", nil)
@@ -62,7 +63,8 @@ func TestHttp2Client(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expect %d, got %d", http.StatusOK, res.StatusCode)
 	}
-	res.Write(os.Stderr)
+	log.Printf("%+v", res)
+	//res.Write(os.Stderr)
 
 	log.Println("end")
 }

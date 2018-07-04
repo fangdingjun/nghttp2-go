@@ -6,14 +6,12 @@ package nghttp2
 */
 import "C"
 import (
-	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,61 +54,6 @@ func NewClientConn(c net.Conn) (*ClientConn, error) {
 	}
 	go conn.run()
 	return conn, nil
-}
-
-func (c *ClientConn) onDataRecv(buf []byte, streamID int) {
-	s := c.streams[streamID]
-	if s.res.Body == nil {
-		//log.Println("empty body")
-		return
-	}
-
-	if bp, ok := s.res.Body.(*bodyProvider); ok {
-		bp.Write(buf)
-	}
-}
-
-func (c *ClientConn) onBeginHeader(streamID int) {
-	s := c.streams[streamID]
-
-	s.res = &http.Response{
-		Header: make(http.Header),
-		Body: &bodyProvider{
-			buf:  new(bytes.Buffer),
-			lock: new(sync.Mutex),
-		},
-	}
-}
-
-func (c *ClientConn) onHeader(streamID int, name, value string) {
-	s := c.streams[streamID]
-	if name == ":status" {
-		statusCode, _ := strconv.Atoi(value)
-		s.res.StatusCode = statusCode
-		s.res.Status = http.StatusText(statusCode)
-		s.res.Proto = "HTTP/2.0"
-		s.res.ProtoMajor = 2
-		s.res.ProtoMinor = 0
-		return
-	}
-	s.res.Header.Add(name, value)
-
-}
-
-func (c *ClientConn) onHeadersDone(streamID int) {
-	s := c.streams[streamID]
-	s.resch <- s.res
-}
-
-func (c *ClientConn) onStreamClose(streamID int) {
-	stream, ok := c.streams[streamID]
-	if ok {
-		stream.Close()
-		c.lock.Lock()
-		delete(c.streams, streamID)
-		c.lock.Unlock()
-	}
-
 }
 
 // Close close the http2 connection
@@ -291,6 +234,7 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	case err := <-s.errch:
 		return nil, err
 	case res := <-s.resch:
+		res.Request = req
 		return res, nil
 	case <-c.errch:
 		return nil, fmt.Errorf("connection error")
