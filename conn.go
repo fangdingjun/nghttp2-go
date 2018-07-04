@@ -128,14 +128,17 @@ func (c *ClientConn) Close() error {
 func (c *ClientConn) run() {
 	var wantRead int
 	var wantWrite int
-	var delay = 50
+	var delay = 50 * time.Millisecond
+	var keepalive = 5 * time.Second
 	var ret C.int
+	var lastDataRecv time.Time
 
 	defer close(c.errch)
 
 	datach := make(chan []byte)
 	errch := make(chan error)
 
+	// data read loop
 	go func() {
 		buf := make([]byte, 16*1024)
 	readloop:
@@ -152,6 +155,24 @@ func (c *ClientConn) run() {
 				break
 			}
 			datach <- buf[:n]
+			lastDataRecv = time.Now()
+		}
+	}()
+
+	// keep alive loop
+	go func() {
+		for {
+			select {
+			case <-c.exitch:
+				return
+			case <-time.After(keepalive):
+			}
+			now := time.Now()
+			last := lastDataRecv
+			d := now.Sub(last)
+			if d > keepalive {
+				C.nghttp2_submit_ping(c.session, 0, nil)
+			}
 		}
 	}()
 
@@ -198,7 +219,7 @@ loop:
 		// make delay when no data read/write
 		if wantRead == 0 && wantWrite == 0 {
 			select {
-			case <-time.After(time.Duration(delay) * time.Millisecond):
+			case <-time.After(delay):
 			}
 		}
 	}
