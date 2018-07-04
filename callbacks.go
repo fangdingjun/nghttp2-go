@@ -7,7 +7,6 @@ import "C"
 import (
 	"bytes"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,7 +15,8 @@ import (
 )
 
 // OnServerDataRecvCallback callback function for libnghttp2 library
-//  want receive data from network,
+// want receive data from network.
+//
 //export OnServerDataRecvCallback
 func OnServerDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 	length C.size_t) C.ssize_t {
@@ -33,7 +33,8 @@ func OnServerDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 }
 
 // OnServerDataSendCallback callback function for libnghttp2 library
-//  want send data to network
+// want send data to network.
+//
 //export OnServerDataSendCallback
 func OnServerDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 	length C.size_t) C.ssize_t {
@@ -48,7 +49,8 @@ func OnServerDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 	return C.ssize_t(n)
 }
 
-// OnServerDataChunkRecv callback function for libnghttp2 library's data chunk recv
+// OnServerDataChunkRecv callback function for libnghttp2 library's data chunk recv.
+//
 //export OnServerDataChunkRecv
 func OnServerDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	data unsafe.Pointer, length C.size_t) C.int {
@@ -60,7 +62,8 @@ func OnServerDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	return C.int(length)
 }
 
-// OnServerBeginHeaderCallback callback function for begin begin header recv
+// OnServerBeginHeaderCallback callback function for begin begin header recv.
+//
 //export OnServerBeginHeaderCallback
 func OnServerBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	conn := (*ServerConn)(ptr)
@@ -80,7 +83,8 @@ func OnServerBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	return 0
 }
 
-// OnServerHeaderCallback callback function for each header recv
+// OnServerHeaderCallback callback function for each header recv.
+//
 //export OnServerHeaderCallback
 func OnServerHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
@@ -113,6 +117,7 @@ func OnServerHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 }
 
 // OnServerStreamEndCallback callback function for the stream when END_STREAM flag set
+//
 //export OnServerStreamEndCallback
 func OnServerStreamEndCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 
@@ -122,13 +127,14 @@ func OnServerStreamEndCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	bp := s.req.Body.(*bodyProvider)
 	if s.req.Method != "CONNECT" {
 		bp.closed = true
-		log.Println("stream end flag set, begin to serve")
+		//log.Println("stream end flag set, begin to serve")
 		go conn.serve(s)
 	}
 	return 0
 }
 
-// OnServerHeadersDoneCallback callback function for the stream when all headers received
+// OnServerHeadersDoneCallback callback function for the stream when all headers received.
+//
 //export OnServerHeadersDoneCallback
 func OnServerHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	conn := (*ServerConn)(ptr)
@@ -145,7 +151,8 @@ func OnServerHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	return 0
 }
 
-// OnServerStreamClose callback function for the stream when closed
+// OnServerStreamClose callback function for the stream when closed.
+//
 //export OnServerStreamClose
 func OnServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	conn := (*ServerConn)(ptr)
@@ -158,9 +165,9 @@ func OnServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 }
 
 // OnDataSourceReadCallback callback function for libnghttp2 library
-//   want read data from data provider source,
-//   return NGHTTP2_ERR_DEFERED will cause data frame defered,
-//	application later call nghttp2_session_resume_data will re-quene the data frame
+// want read data from data provider source,
+// return NGHTTP2_ERR_DEFERED will cause data frame defered,
+// application later call nghttp2_session_resume_data will re-quene the data frame
 //
 //export OnDataSourceReadCallback
 func OnDataSourceReadCallback(ptr unsafe.Pointer,
@@ -185,7 +192,8 @@ func OnDataSourceReadCallback(ptr unsafe.Pointer,
 	return C.ssize_t(n)
 }
 
-// OnClientDataChunkRecv callback function for libnghttp2 library data chunk received,
+// OnClientDataChunkRecv callback function for libnghttp2 library data chunk received.
+//
 //export OnClientDataChunkRecv
 func OnClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	buf unsafe.Pointer, length C.size_t) C.int {
@@ -196,7 +204,8 @@ func OnClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	return 0
 }
 
-// OnClientDataRecvCallback callback function for libnghttp2 library want read data from network,
+// OnClientDataRecvCallback callback function for libnghttp2 library want read data from network.
+//
 //export OnClientDataRecvCallback
 func OnClientDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
 	//log.Println("data read req", int(size))
@@ -214,7 +223,8 @@ func OnClientDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 	return C.ssize_t(n)
 }
 
-// OnClientDataSendCallback callback function for libnghttp2 library want send data to network,
+// OnClientDataSendCallback callback function for libnghttp2 library want send data to network.
+//
 //export OnClientDataSendCallback
 func OnClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
 	//log.Println("data write req ", int(size))
@@ -230,7 +240,8 @@ func OnClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 	return C.ssize_t(n)
 }
 
-// OnClientBeginHeaderCallback callback function for begin header receive,
+// OnClientBeginHeaderCallback callback function for begin header receive.
+//
 //export OnClientBeginHeaderCallback
 func OnClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("begin header")
@@ -239,7 +250,8 @@ func OnClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	return 0
 }
 
-// OnClientHeaderCallback callback function for each header received,
+// OnClientHeaderCallback callback function for each header received.
+//
 //export OnClientHeaderCallback
 func OnClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
@@ -252,7 +264,8 @@ func OnClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	return 0
 }
 
-// OnClientHeadersDoneCallback callback function for the stream when all headers received,
+// OnClientHeadersDoneCallback callback function for the stream when all headers received.
+//
 //export OnClientHeadersDoneCallback
 func OnClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("frame recv")
@@ -261,7 +274,8 @@ func OnClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	return 0
 }
 
-// OnClientStreamClose callback function for the stream when closed,
+// OnClientStreamClose callback function for the stream when closed.
+//
 //export OnClientStreamClose
 func OnClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("stream close")

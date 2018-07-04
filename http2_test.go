@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"testing"
+
+	"golang.org/x/net/http2"
 )
 
 func TestHttp2Client(t *testing.T) {
@@ -80,7 +83,7 @@ func TestHttp2Server(t *testing.T) {
 	defer l.Close()
 	addr := l.Addr().String()
 	go func() {
-		http.HandleFunc("/get", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 			log.Printf("%+v", r)
 			hdr := w.Header()
 			hdr.Set("content-type", "text/plain")
@@ -119,16 +122,26 @@ func TestHttp2Server(t *testing.T) {
 	if cstate.NegotiatedProtocol != "h2" {
 		t.Fatal("no http2 on server")
 	}
-	h2conn, err := NewClientConn(conn)
-	if err != nil {
-		t.Fatal(err)
+	client := &http.Client{
+		Transport: &http2.Transport{
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				conn, err := tls.Dial(network, addr, &tls.Config{
+					NextProtos:         []string{"h2", "http/1.1"},
+					InsecureSkipVerify: true,
+				})
+				if err := conn.Handshake(); err != nil {
+					return nil, err
+				}
+				return conn, err
+			},
+		},
 	}
 	d := bytes.NewBuffer([]byte("hello"))
 	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("https://%s/get?a=b&c=d", addr), d)
+		fmt.Sprintf("https://%s/test?a=b&c=d", addr), d)
 	req.Header.Add("User-Agent", "nghttp2/1.32")
 	req.Header.Add("Content-Type", "text/palin")
-	res, err := h2conn.CreateRequest(req)
+	res, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,4 +158,73 @@ func TestHttp2Server(t *testing.T) {
 	if string(data) != "hello" {
 		t.Errorf("expect %s, got %s", "hello", string(data))
 	}
+}
+
+func TestHttp2Handler(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{
+		TLSConfig: &tls.Config{
+			NextProtos: []string{"h2", "http/1.1"},
+		},
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){
+			"h2": HTTP2Handler,
+		},
+	}
+	defer srv.Close()
+
+	testdata := "asc fasdf32ddfasfff\r\nassdf312313"
+	addr := l.Addr().String()
+	go func() {
+		http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+			hdr := w.Header()
+			hdr.Set("content-type", "text/plain")
+			hdr.Set("aa", "bb")
+			fmt.Fprintf(w, testdata)
+		})
+		http.Handle("/", http.FileServer(http.Dir("/")))
+		srv.ServeTLS(l, "testdata/server.crt", "testdata/server.key")
+	}()
+	client := &http.Client{
+		Transport: &http2.Transport{
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				conn, err := tls.Dial(network, addr, &tls.Config{
+					NextProtos:         []string{"h2", "http/1.1"},
+					InsecureSkipVerify: true,
+				})
+				if err := conn.Handshake(); err != nil {
+					return nil, err
+				}
+				return conn, err
+			},
+		},
+	}
+	u := fmt.Sprintf("https://%s/test", addr)
+	resp, err := client.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("http error %d", resp.StatusCode)
+	}
+	if resp.TLS == nil {
+		t.Errorf("not tls")
+	}
+	if resp.TLS.NegotiatedProtocol != "h2" {
+		t.Errorf("http2 is not enabled")
+	}
+	d, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Error(err)
+	}
+	if string(d) != testdata {
+		t.Errorf("expect %s, got %s", testdata, string(d))
+	}
+	if resp.Header.Get("aa") != "bb" {
+		t.Errorf("expect header not found")
+	}
+	//io.Copy(os.Stdout, resp.Body)
+	resp.Write(os.Stdout)
 }

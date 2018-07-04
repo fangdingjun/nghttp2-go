@@ -7,6 +7,7 @@ package nghttp2
 import "C"
 import (
 	"bytes"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -288,6 +289,27 @@ type ServerConn struct {
 	errch   chan struct{}
 	exitch  chan struct{}
 	err     error
+}
+
+// HTTP2Handler is the http2 server handler that can co-work with standard net/http.
+//
+// usage example:
+//  l, err := net.Listen("tcp", ":1222")
+//  srv := &http.Server{
+//    TLSConfig: &tls.Config{
+//        NextProtos:[]string{"h2", "http/1.1"},
+//   }
+//   TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){
+//       "h2": nghttp2.Http2Handler
+//     }
+//   }
+//  srv.ServeTLS(l, "server.crt", "server.key")
+func HTTP2Handler(srv *http.Server, conn *tls.Conn, handler http.Handler) {
+	h2conn, err := NewServerConn(conn, handler)
+	if err != nil {
+		panic(err.Error())
+	}
+	h2conn.Run()
 }
 
 // NewServerConn create new server connection
