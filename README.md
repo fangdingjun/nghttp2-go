@@ -3,7 +3,7 @@ nghttp2
 
 nghttp2 is libnghttp2 binding for golang
 
-see doc [here](https://godoc.org/github.com/fangdingjun/nghttp2)
+see doc [here](https://godoc.org/github.com/fangdingjun/nghttp2-go)
 
 server usage example:
 
