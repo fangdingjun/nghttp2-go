@@ -16,9 +16,9 @@ import (
 )
 
 func TestHttp2Client(t *testing.T) {
-	conn, err := tls.Dial("tcp", "www.simicloud.com:443", &tls.Config{
+	conn, err := tls.Dial("tcp", "nghttp2.org:443", &tls.Config{
 		NextProtos: []string{"h2"},
-		ServerName: "www.simicloud.com",
+		ServerName: "nghttp2.org",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestHttp2Client(t *testing.T) {
 	param.Add("f", "d")
 	data := bytes.NewReader([]byte(param.Encode()))
 	req, _ := http.NewRequest("POST",
-		"https://www.simicloud.com/media/httpbin/post?a=b&c=d",
+		"https://nghttp2.org/httpbin/post?a=b&c=d",
 		data)
 	log.Printf("%+v", req)
 	req.Header.Set("accept", "*/*")
@@ -55,7 +55,7 @@ func TestHttp2Client(t *testing.T) {
 	//res.Write(os.Stderr)
 
 	req, _ = http.NewRequest("GET",
-		"https://www.simicloud.com/media/httpbin/get?a=b&c=d", nil)
+		"https://nghttp2.org/httpbin/get?a=b&c=d", nil)
 	res, err = h2conn.CreateRequest(req)
 	if err != nil {
 		t.Fatal(err)
