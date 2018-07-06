@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +42,7 @@ func NewClientConn(c net.Conn) (*ClientConn, error) {
 		errch:  make(chan struct{}),
 		exitch: make(chan struct{}),
 	}
-	conn.session = C.init_client_session(
+	conn.session = C.init_nghttp2_client_session(
 		C.size_t(int(uintptr(unsafe.Pointer(conn)))))
 	if conn.session == nil {
 		return nil, fmt.Errorf("init session failed")
@@ -247,6 +248,7 @@ type ServerConn struct {
 	// Handler handler to handle request
 	Handler http.Handler
 
+	closed  bool
 	session *C.nghttp2_session
 	streams map[int]*ServerStream
 	lock    *sync.Mutex
@@ -287,7 +289,7 @@ func NewServerConn(c net.Conn, handler http.Handler) (*ServerConn, error) {
 		errch:   make(chan struct{}),
 		exitch:  make(chan struct{}),
 	}
-	conn.session = C.init_server_session(C.size_t(uintptr(unsafe.Pointer(conn))))
+	conn.session = C.init_nghttp2_server_session(C.size_t(uintptr(unsafe.Pointer(conn))))
 	if conn.session == nil {
 		return nil, fmt.Errorf("init session failed")
 	}
@@ -306,12 +308,18 @@ func (c *ServerConn) serve(s *ServerStream) {
 	if c.Handler == nil {
 		handler = http.DefaultServeMux
 	}
+	if s.req.URL == nil {
+		s.req.URL = &url.URL{}
+	}
 	handler.ServeHTTP(s, s.req)
 	s.Close()
 }
 
 // Close close the server connection
 func (c *ServerConn) Close() error {
+	if c.closed {
+		return nil
+	}
 	for _, s := range c.streams {
 		s.Close()
 	}
@@ -319,6 +327,7 @@ func (c *ServerConn) Close() error {
 	C.nghttp2_session_del(c.session)
 	close(c.exitch)
 	c.conn.Close()
+	c.closed = true
 	return nil
 }
 
@@ -326,8 +335,9 @@ func (c *ServerConn) Close() error {
 func (c *ServerConn) Run() {
 	var wantRead int
 	var wantWrite int
-	var delay = 50
+	var delay = 100 * time.Millisecond
 	var ret C.int
+	var shouldDelay bool
 
 	defer c.Close()
 	defer close(c.errch)
@@ -391,14 +401,19 @@ loop:
 				//log.Println(c.err)
 				break loop
 			}
+			shouldDelay = false
 		default:
+			// want read but data not avaliable
+			if wantRead != 0 {
+				shouldDelay = true
+			}
 		}
 
+		wantWrite = int(C.nghttp2_session_want_write(c.session))
+
 		// make delay when no data read/write
-		if wantRead == 0 && wantWrite == 0 {
-			select {
-			case <-time.After(time.Duration(delay) * time.Millisecond):
-			}
+		if (shouldDelay || wantRead == 0) && wantWrite == 0 {
+			time.Sleep(delay)
 		}
 	}
 }

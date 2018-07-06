@@ -84,7 +84,7 @@ static int on_server_begin_headers_callback(nghttp2_session *session,
     return 0;
 }
 
-nghttp2_session *init_server_session(size_t data)
+nghttp2_session *init_nghttp2_server_session(size_t data)
 {
     nghttp2_session_callbacks *callbacks;
     nghttp2_session *session;
@@ -312,7 +312,7 @@ void init_client_callbacks(nghttp2_session_callbacks *callbacks)
         callbacks, on_client_begin_headers_callback);
 }
 
-nghttp2_session *init_client_session(size_t data)
+nghttp2_session *init_nghttp2_client_session(size_t data)
 {
     int ret;
     nghttp2_session *session;

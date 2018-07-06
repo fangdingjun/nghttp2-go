@@ -73,12 +73,13 @@ type bodyProvider struct {
 // Read read data from provider
 // will block when data not yet avaliable
 func (bp *bodyProvider) Read(buf []byte) (int, error) {
+	var delay = 100 * time.Millisecond
 	for {
 		bp.lock.Lock()
 		n, err := bp.buf.Read(buf)
 		bp.lock.Unlock()
 		if err != nil && !bp.closed {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(delay)
 			continue
 		}
 		return n, err

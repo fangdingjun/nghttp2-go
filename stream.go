@@ -162,7 +162,9 @@ func (s *ServerStream) Close() error {
 		return nil
 	}
 	//C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
-	s.req.Body.Close()
+	if s.req.Body != nil {
+		s.req.Body.Close()
+	}
 	if s.dp != nil {
 		s.dp.Close()
 	}

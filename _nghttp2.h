@@ -46,7 +46,7 @@ int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen
 
 int send_client_connection_header(nghttp2_session *session);
 
-nghttp2_session *init_client_session(size_t data);
-nghttp2_session *init_server_session(size_t data);
+nghttp2_session *init_nghttp2_client_session(size_t data);
+nghttp2_session *init_nghttp2_server_session(size_t data);
 
 #endif
