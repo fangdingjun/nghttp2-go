@@ -1,5 +1,5 @@
-// Package nghttp2 is libnghttp2 binding for golang
-/*
+/*Package nghttp2 is libnghttp2 binding for golang.
+
 server example
 
 	cert, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
