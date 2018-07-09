@@ -29,7 +29,7 @@ func TestHttp2Client(t *testing.T) {
 	if cstate.NegotiatedProtocol != "h2" {
 		t.Fatal("no http2 on server")
 	}
-	h2conn, err := NewClientConn(conn)
+	h2conn, err := Client(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestHttp2Server(t *testing.T) {
 			if err != nil {
 				break
 			}
-			h2conn, err := NewServerConn(c, nil)
+			h2conn, err := Server(c, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

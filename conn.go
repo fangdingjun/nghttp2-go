@@ -34,8 +34,8 @@ type ClientConn struct {
 	err     error
 }
 
-// NewClientConn create http2 client
-func NewClientConn(c net.Conn) (*ClientConn, error) {
+// Client create http2 client
+func Client(c net.Conn) (*ClientConn, error) {
 	conn := &ClientConn{
 		conn: c, streams: make(map[int]*ClientStream),
 		lock:   new(sync.Mutex),
@@ -272,15 +272,15 @@ type ServerConn struct {
 //   }
 //  srv.ServeTLS(l, "server.crt", "server.key")
 func HTTP2Handler(srv *http.Server, conn *tls.Conn, handler http.Handler) {
-	h2conn, err := NewServerConn(conn, handler)
+	h2conn, err := Server(conn, handler)
 	if err != nil {
 		panic(err.Error())
 	}
 	h2conn.Run()
 }
 
-// NewServerConn create new server connection
-func NewServerConn(c net.Conn, handler http.Handler) (*ServerConn, error) {
+// Server create new server connection
+func Server(c net.Conn, handler http.Handler) (*ServerConn, error) {
 	conn := &ServerConn{
 		conn:    c,
 		Handler: handler,
