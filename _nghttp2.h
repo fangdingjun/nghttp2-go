@@ -7,23 +7,23 @@
 
 #define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
 
-extern ssize_t OnClientDataRecvCallback(void *, void *data, size_t);
-extern ssize_t OnClientDataSendCallback(void *, void *data, size_t);
-extern ssize_t OnDataSourceReadCallback(void *, void *, size_t);
-extern int OnClientDataChunkRecv(void *, int, void *, size_t);
-extern int OnClientBeginHeaderCallback(void *, int);
-extern int OnClientHeaderCallback(void *, int, void *, int, void *, int);
-extern int OnClientHeadersDoneCallback(void *, int);
-extern int OnClientStreamClose(void *, int);
+extern ssize_t onClientDataRecvCallback(void *, void *data, size_t);
+extern ssize_t onClientDataSendCallback(void *, void *data, size_t);
+extern ssize_t onDataSourceReadCallback(void *, void *, size_t);
+extern int onClientDataChunkRecv(void *, int, void *, size_t);
+extern int onClientBeginHeaderCallback(void *, int);
+extern int onClientHeaderCallback(void *, int, void *, int, void *, int);
+extern int onClientHeadersDoneCallback(void *, int);
+extern int onClientStreamClose(void *, int);
 
-extern ssize_t OnServerDataRecvCallback(void *, void *data, size_t);
-extern ssize_t OnServerDataSendCallback(void *, void *data, size_t);
-extern int OnServerDataChunkRecv(void *, int, void *, size_t);
-extern int OnServerBeginHeaderCallback(void *, int);
-extern int OnServerHeaderCallback(void *, int, void *, int, void *, int);
-extern int OnServerStreamEndCallback(void *, int);
-extern int OnServerHeadersDoneCallback(void *, int);
-extern int OnServerStreamClose(void *, int);
+extern ssize_t onServerDataRecvCallback(void *, void *data, size_t);
+extern ssize_t onServerDataSendCallback(void *, void *data, size_t);
+extern int onServerDataChunkRecv(void *, int, void *, size_t);
+extern int onServerBeginHeaderCallback(void *, int);
+extern int onServerHeaderCallback(void *, int, void *, int, void *, int);
+extern int onServerStreamEndCallback(void *, int);
+extern int onServerHeadersDoneCallback(void *, int);
+extern int onServerStreamClose(void *, int);
 int send_server_connection_header(nghttp2_session *session);
 
 struct nv_array
