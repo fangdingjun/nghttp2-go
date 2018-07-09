@@ -317,6 +317,9 @@ func (c *ServerConn) serve(s *ServerStream) {
 
 // Close close the server connection
 func (c *ServerConn) Close() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	if c.closed {
 		return nil
 	}
