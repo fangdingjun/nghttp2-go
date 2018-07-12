@@ -85,10 +85,11 @@ func (s *ClientStream) Close() error {
 	}
 
 	s.conn.lock.Lock()
-	defer s.conn.lock.Unlock()
 	if _, ok := s.conn.streams[s.streamID]; ok {
 		delete(s.conn.streams, s.streamID)
 	}
+	s.conn.lock.Unlock()
+
 	return nil
 }
 

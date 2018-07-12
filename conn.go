@@ -118,7 +118,7 @@ func (c *ClientConn) run() {
 				c.lock.Lock()
 				c.err = err
 				c.lock.Unlock()
-				errch <- struct{}{}
+				close(errch)
 				break
 			}
 			//log.Printf("read %d bytes from network", n)
@@ -132,9 +132,12 @@ func (c *ClientConn) run() {
 
 			C.free(d1)
 			if int(ret1) < 0 {
+				c.lock.Lock()
 				c.err = fmt.Errorf("sesion recv error: %s",
 					C.GoString(C.nghttp2_strerror(ret)))
 				//log.Println(c.err)
+				c.lock.Unlock()
+				close(errch)
 				break
 			}
 		}
@@ -184,7 +187,7 @@ loop:
 				C.GoString(C.nghttp2_strerror(ret)))
 			c.lock.Unlock()
 			//log.Println(c.err)
-			errch <- struct{}{}
+			close(errch)
 			break
 		}
 
@@ -246,10 +249,12 @@ func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err
 		errch:    make(chan error),
 		lock:     new(sync.Mutex),
 	}
+
 	c.lock.Lock()
 	c.streams[int(streamID)] = s
 	c.streamCount++
 	c.lock.Unlock()
+
 	//log.Printf("new stream id %d", int(streamID))
 	select {
 	case err := <-s.errch:
@@ -374,6 +379,9 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 
 // CanTakeNewRequest check if the ClientConn can submit a new request
 func (c *ClientConn) CanTakeNewRequest() bool {
+	c.lock.Lock()
+	c.lock.Unlock()
+
 	if c.closed {
 		return false
 	}
@@ -516,7 +524,7 @@ func (c *ServerConn) Run() {
 				c.lock.Lock()
 				c.err = err
 				c.lock.Unlock()
-				errch <- struct{}{}
+				close(errch)
 				break
 			}
 
@@ -534,7 +542,7 @@ func (c *ServerConn) Run() {
 					C.GoString(C.nghttp2_strerror(ret)))
 				c.lock.Unlock()
 				//log.Println(c.err)
-				errch <- struct{}{}
+				close(errch)
 				break
 			}
 		}
@@ -562,7 +570,7 @@ loop:
 				C.GoString(C.nghttp2_strerror(ret)))
 			c.lock.Unlock()
 			//log.Println(c.err)
-			errch <- struct{}{}
+			close(errch)
 			break
 		}
 
