@@ -199,22 +199,25 @@ loop:
 	}
 }
 
-// Connect submit a CONNECT request
-func (c *ClientConn) Connect(req *http.Request) (*ClientStream, error) {
+// Connect submit a CONNECT request, return a ClientStream and http status code from server
+//
+// equals to "CONNECT host:port" in http/1.1
+func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err error) {
 	if c.err != nil {
-		return nil, c.err
+		return nil, http.StatusServiceUnavailable, c.err
 	}
 	nvIndex := 0
 	nvMax := 5
 	nva := C.new_nv_array(C.size_t(nvMax))
 	//log.Printf("%s %s", req.Method, req.RequestURI)
-	setNvArray(nva, nvIndex, ":method", req.Method, 0)
+	setNvArray(nva, nvIndex, ":method", "CONNECT", 0)
 	nvIndex++
 	//setNvArray(nva, nvIndex, ":scheme", "https", 0)
 	//nvIndex++
 	//log.Printf("header authority: %s", req.RequestURI)
-	setNvArray(nva, nvIndex, ":authority", req.RequestURI, 0)
+	setNvArray(nva, nvIndex, ":authority", addr, 0)
 	nvIndex++
+
 	var dp *dataProvider
 	var cdp *C.nghttp2_data_provider
 	dp, cdp = newDataProvider(c.lock)
@@ -225,7 +228,7 @@ func (c *ClientConn) Connect(req *http.Request) (*ClientStream, error) {
 
 	C.delete_nv_array(nva)
 	if int(streamID) < 0 {
-		return nil, fmt.Errorf("submit request error: %s",
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("submit request error: %s",
 			C.GoString(C.nghttp2_strerror(streamID)))
 	}
 	if dp != nil {
@@ -250,16 +253,15 @@ func (c *ClientConn) Connect(req *http.Request) (*ClientStream, error) {
 	select {
 	case err := <-s.errch:
 		//log.Println("wait response, got ", err)
-		return nil, err
+		return nil, http.StatusServiceUnavailable, err
 	case res := <-s.resch:
 		if res != nil {
-			res.Request = req
-			return s, nil
+			return s, res.StatusCode, nil
 		}
 		//log.Println("wait response, empty response")
-		return nil, io.EOF
+		return nil, http.StatusServiceUnavailable, io.EOF
 	case <-c.errch:
-		return nil, fmt.Errorf("connection error")
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("connection error")
 	}
 }
 

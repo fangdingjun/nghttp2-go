@@ -30,11 +30,6 @@ type ClientStream struct {
 	lock   *sync.Mutex
 }
 
-// Response return response of the current stream
-func (s *ClientStream) Response() *http.Response {
-	return s.res
-}
-
 // Read read stream data
 func (s *ClientStream) Read(buf []byte) (n int, err error) {
 	if s.closed || s.res == nil || s.res.Body == nil {
