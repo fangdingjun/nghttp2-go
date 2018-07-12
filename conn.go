@@ -358,6 +358,22 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	//return nil, fmt.Errorf("unknown error")
 }
 
+// CanTakeNewRequest check if the ClientConn can submit a new request
+func (c *ClientConn) CanTakeNewRequest() bool {
+	if c.closed {
+		return false
+	}
+
+	if c.err != nil {
+		return false
+	}
+
+	if c.streamCount > ((1 << 31) / 2) {
+		return false
+	}
+	return true
+}
+
 // ServerConn server connection
 type ServerConn struct {
 	// Handler handler to handle request
