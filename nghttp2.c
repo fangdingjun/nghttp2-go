@@ -1,6 +1,11 @@
 #include "_nghttp2.h"
 
-int on_error_callback(nghttp2_session *session, const char *msg, size_t len, void *user_data);
+int on_error_callback(nghttp2_session *session, const char *msg,
+                      size_t len, void *user_data);
+
+int on_invalid_frame_recv_callback(nghttp2_session *session,
+                                   const nghttp2_frame *frame,
+                                   int lib_error_code, void *user_data);
 
 static ssize_t server_send_callback(nghttp2_session *session,
                                     const uint8_t *data, size_t length,
@@ -101,6 +106,9 @@ nghttp2_session *init_nghttp2_server_session(size_t data)
     nghttp2_session_callbacks_set_on_stream_close_callback(
         callbacks, on_server_stream_close_callback);
 
+    nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks,
+                                                                 on_invalid_frame_recv_callback);
+
     nghttp2_session_callbacks_set_on_data_chunk_recv_callback(
         callbacks, on_server_data_chunk_recv_callback);
     nghttp2_session_callbacks_set_on_header_callback(callbacks,
@@ -119,7 +127,7 @@ nghttp2_session *init_nghttp2_server_session(size_t data)
 int send_server_connection_header(nghttp2_session *session)
 {
     nghttp2_settings_entry iv[1] = {
-        {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 1000}};
+        {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}};
     int rv;
 
     rv = nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv,
@@ -191,7 +199,8 @@ static int on_client_begin_headers_callback(nghttp2_session *session,
 }
 
 int on_invalid_frame_recv_callback(nghttp2_session *session,
-                                   const nghttp2_frame *frame, int lib_error_code, void *user_data)
+                                   const nghttp2_frame *frame,
+                                   int lib_error_code, void *user_data)
 {
     printf("on_invalid_frame_recv, frame %d, code %d, msg %s\n",
            frame->hd.type,
@@ -199,7 +208,7 @@ int on_invalid_frame_recv_callback(nghttp2_session *session,
            nghttp2_strerror(lib_error_code));
     return 0;
 }
-
+#if 0
 static int on_client_frame_send_callback(nghttp2_session *session,
                                          const nghttp2_frame *frame, void *user_data)
 {
@@ -235,7 +244,7 @@ static int on_client_frame_send_callback(nghttp2_session *session,
     }
     return 0;
 }
-
+#endif
 static int on_client_frame_recv_callback(nghttp2_session *session,
                                          const nghttp2_frame *frame, void *user_data)
 {
@@ -288,6 +297,7 @@ static ssize_t data_source_read_callback(nghttp2_session *session, int32_t strea
     }
     return ret;
 }
+
 int on_error_callback(nghttp2_session *session,
                       const char *msg, size_t len, void *user_data)
 {
@@ -302,7 +312,8 @@ void init_client_callbacks(nghttp2_session_callbacks *callbacks)
     //nghttp2_session_callbacks_set_recv_callback(callbacks, client_recv_callback);
 
     //nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
-    nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks, on_invalid_frame_recv_callback);
+    nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks,
+                                                                 on_invalid_frame_recv_callback);
     nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
                                                          on_client_frame_recv_callback);
 
@@ -334,11 +345,11 @@ nghttp2_session *init_nghttp2_client_session(size_t data)
     }
     return session;
 }
-
+#if 0
 int send_client_connection_header(nghttp2_session *session)
 {
-    nghttp2_settings_entry iv[1] = {
-        {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}};
+    //nghttp2_settings_entry iv[1] = {
+    //    {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}};
     int rv;
 
     /* client 24 bytes magic string will be sent by nghttp2 library */
@@ -356,7 +367,8 @@ int send_client_connection_header(nghttp2_session *session)
     */
     return rv;
 }
-
+#endif
+#if 0
 int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen,
                        nghttp2_data_provider *dp)
 {
@@ -389,6 +401,7 @@ int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen
 
     return stream_id;
 }
+#endif
 
 struct nv_array *new_nv_array(size_t n)
 {

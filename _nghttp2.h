@@ -42,10 +42,10 @@ int nv_array_set(struct nv_array *a, int index,
 
 struct nv_array *new_nv_array(size_t n);
 
-int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen,
-                       nghttp2_data_provider *dp);
+//int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen,
+//                       nghttp2_data_provider *dp);
 
-int send_client_connection_header(nghttp2_session *session);
+//int send_client_connection_header(nghttp2_session *session);
 
 nghttp2_session *init_nghttp2_client_session(size_t data);
 nghttp2_session *init_nghttp2_server_session(size_t data);

@@ -49,7 +49,7 @@ func Client(c net.Conn) (*ClientConn, error) {
 	if conn.session == nil {
 		return nil, fmt.Errorf("init session failed")
 	}
-	ret := C.send_client_connection_header(conn.session)
+	ret := C.nghttp2_submit_settings(conn.session, 0, nil, 0)
 	if int(ret) < 0 {
 		conn.Close()
 		return nil, fmt.Errorf("submit settings error: %s",
@@ -223,13 +223,14 @@ func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err
 	dp, cdp = newDataProvider(c.lock)
 
 	c.lock.Lock()
-	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
+	streamID := C.nghttp2_submit_request(c.session, nil,
+		nva.nv, C.size_t(nvIndex), cdp, nil)
 	c.lock.Unlock()
 
 	C.delete_nv_array(nva)
 	if int(streamID) < 0 {
-		return nil, http.StatusServiceUnavailable, fmt.Errorf("submit request error: %s",
-			C.GoString(C.nghttp2_strerror(streamID)))
+		return nil, http.StatusServiceUnavailable, fmt.Errorf(
+			"submit request error: %s", C.GoString(C.nghttp2_strerror(streamID)))
 	}
 	if dp != nil {
 		dp.streamID = int(streamID)
@@ -314,7 +315,8 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	}
 
 	c.lock.Lock()
-	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
+	streamID := C.nghttp2_submit_request(c.session, nil,
+		nva.nv, C.size_t(nvIndex), cdp, nil)
 	c.lock.Unlock()
 
 	C.delete_nv_array(nva)
