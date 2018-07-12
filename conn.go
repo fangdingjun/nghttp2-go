@@ -25,13 +25,15 @@ var (
 
 // ClientConn http2 client connection
 type ClientConn struct {
-	session *C.nghttp2_session
-	conn    net.Conn
-	streams map[int]*ClientStream
-	lock    *sync.Mutex
-	errch   chan struct{}
-	exitch  chan struct{}
-	err     error
+	session     *C.nghttp2_session
+	conn        net.Conn
+	streams     map[int]*ClientStream
+	lock        *sync.Mutex
+	errch       chan struct{}
+	exitch      chan struct{}
+	err         error
+	closed      bool
+	streamCount int
 }
 
 // Client create http2 client
@@ -57,8 +59,22 @@ func Client(c net.Conn) (*ClientConn, error) {
 	return conn, nil
 }
 
+// Error return current error on connection
+func (c *ClientConn) Error() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.err
+}
+
 // Close close the http2 connection
 func (c *ClientConn) Close() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if c.closed {
+		return nil
+	}
+	//log.Println("close client connection")
+	c.closed = true
 	for _, s := range c.streams {
 		s.Close()
 	}
@@ -70,17 +86,17 @@ func (c *ClientConn) Close() error {
 }
 
 func (c *ClientConn) run() {
-	var wantRead int
 	var wantWrite int
 	var delay = 50 * time.Millisecond
 	var keepalive = 5 * time.Second
 	var ret C.int
 	var lastDataRecv time.Time
 
+	//defer c.Close()
+
 	defer close(c.errch)
 
-	datach := make(chan []byte)
-	errch := make(chan error)
+	errch := make(chan struct{}, 5)
 
 	// data read loop
 	go func() {
@@ -90,16 +106,35 @@ func (c *ClientConn) run() {
 			select {
 			case <-c.exitch:
 				break readloop
+			case <-errch:
+				break readloop
 			default:
 			}
 
 			n, err := c.conn.Read(buf)
 			if err != nil {
-				errch <- err
+				c.lock.Lock()
+				c.err = err
+				c.lock.Unlock()
+				errch <- struct{}{}
 				break
 			}
-			datach <- buf[:n]
+			//log.Printf("read %d bytes from network", n)
 			lastDataRecv = time.Now()
+			d1 := C.CBytes(buf[:n])
+
+			c.lock.Lock()
+			ret1 := C.nghttp2_session_mem_recv(c.session,
+				(*C.uchar)(d1), C.size_t(n))
+			c.lock.Unlock()
+
+			C.free(d1)
+			if int(ret1) < 0 {
+				c.err = fmt.Errorf("sesion recv error: %s",
+					C.GoString(C.nghttp2_strerror(ret)))
+				//log.Println(c.err)
+				break
+			}
 		}
 	}()
 
@@ -109,13 +144,18 @@ func (c *ClientConn) run() {
 			select {
 			case <-c.exitch:
 				return
+			case <-errch:
+				return
 			case <-time.After(keepalive):
 			}
 			now := time.Now()
 			last := lastDataRecv
 			d := now.Sub(last)
 			if d > keepalive {
+				c.lock.Lock()
 				C.nghttp2_submit_ping(c.session, 0, nil)
+				c.lock.Unlock()
+				//log.Println("submit ping")
 			}
 		}
 	}()
@@ -125,47 +165,99 @@ loop:
 		select {
 		case <-c.errch:
 			break loop
-		case err := <-errch:
-			c.err = err
+		case <-errch:
 			break loop
 		case <-c.exitch:
 			break loop
 		default:
 		}
 
-		wantWrite = int(C.nghttp2_session_want_write(c.session))
-		if wantWrite != 0 {
-			ret = C.nghttp2_session_send(c.session)
-			if int(ret) < 0 {
-				c.err = fmt.Errorf("sesion send error: %s",
-					C.GoString(C.nghttp2_strerror(ret)))
-				//log.Println(c.err)
-				break
-			}
+		c.lock.Lock()
+		ret = C.nghttp2_session_send(c.session)
+		c.lock.Unlock()
+
+		if int(ret) < 0 {
+			c.lock.Lock()
+			c.err = fmt.Errorf("sesion send error: %s",
+				C.GoString(C.nghttp2_strerror(ret)))
+			c.lock.Unlock()
+			//log.Println(c.err)
+			errch <- struct{}{}
+			break
 		}
 
-		wantRead = int(C.nghttp2_session_want_read(c.session))
-		select {
-		case d := <-datach:
-			d1 := C.CBytes(d)
-			ret1 := C.nghttp2_session_mem_recv(c.session,
-				(*C.uchar)(d1), C.size_t(int(len(d))))
-			C.free(d1)
-			if int(ret1) < 0 {
-				c.err = fmt.Errorf("sesion recv error: %s",
-					C.GoString(C.nghttp2_strerror(ret)))
-				//log.Println(c.err)
-				break loop
-			}
-		default:
-		}
+		c.lock.Lock()
+		wantWrite = int(C.nghttp2_session_want_write(c.session))
+		c.lock.Unlock()
 
 		// make delay when no data read/write
-		if wantRead == 0 && wantWrite == 0 {
-			select {
-			case <-time.After(delay):
-			}
+		if wantWrite == 0 {
+			time.Sleep(delay)
 		}
+	}
+}
+
+// Connect submit a CONNECT request
+func (c *ClientConn) Connect(req *http.Request) (*ClientStream, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	nvIndex := 0
+	nvMax := 5
+	nva := C.new_nv_array(C.size_t(nvMax))
+	//log.Printf("%s %s", req.Method, req.RequestURI)
+	setNvArray(nva, nvIndex, ":method", req.Method, 0)
+	nvIndex++
+	//setNvArray(nva, nvIndex, ":scheme", "https", 0)
+	//nvIndex++
+	//log.Printf("header authority: %s", req.RequestURI)
+	setNvArray(nva, nvIndex, ":authority", req.RequestURI, 0)
+	nvIndex++
+	var dp *dataProvider
+	var cdp *C.nghttp2_data_provider
+	dp, cdp = newDataProvider(c.lock)
+
+	c.lock.Lock()
+	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
+	c.lock.Unlock()
+
+	C.delete_nv_array(nva)
+	if int(streamID) < 0 {
+		return nil, fmt.Errorf("submit request error: %s",
+			C.GoString(C.nghttp2_strerror(streamID)))
+	}
+	if dp != nil {
+		dp.streamID = int(streamID)
+		dp.session = c.session
+	}
+	//log.Println("stream id ", int(streamID))
+	s := &ClientStream{
+		streamID: int(streamID),
+		conn:     c,
+		dp:       dp,
+		cdp:      cdp,
+		resch:    make(chan *http.Response),
+		errch:    make(chan error),
+		lock:     new(sync.Mutex),
+	}
+	c.lock.Lock()
+	c.streams[int(streamID)] = s
+	c.streamCount++
+	c.lock.Unlock()
+	//log.Printf("new stream id %d", int(streamID))
+	select {
+	case err := <-s.errch:
+		//log.Println("wait response, got ", err)
+		return nil, err
+	case res := <-s.resch:
+		if res != nil {
+			res.Request = req
+			return s, nil
+		}
+		//log.Println("wait response, empty response")
+		return nil, io.EOF
+	case <-c.errch:
+		return nil, fmt.Errorf("connection error")
 	}
 }
 
@@ -180,8 +272,10 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	nva := C.new_nv_array(C.size_t(nvMax))
 	setNvArray(nva, nvIndex, ":method", req.Method, 0)
 	nvIndex++
-	setNvArray(nva, nvIndex, ":scheme", "https", 0)
-	nvIndex++
+	if req.Method != "CONNECT" {
+		setNvArray(nva, nvIndex, ":scheme", "https", 0)
+		nvIndex++
+	}
 	setNvArray(nva, nvIndex, ":authority", req.Host, 0)
 	nvIndex++
 
@@ -190,10 +284,15 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	if q != "" {
 		p = p + "?" + q
 	}
-	setNvArray(nva, nvIndex, ":path", p, 0)
-	nvIndex++
+	if req.Method != "CONNECT" {
+		setNvArray(nva, nvIndex, ":path", p, 0)
+		nvIndex++
+	}
+	//log.Printf("%s http://%s%s", req.Method, req.Host, p)
 	for k, v := range req.Header {
-		if strings.ToLower(k) == "host" {
+		//log.Printf("header %s: %s\n", k, v[0])
+		_k := strings.ToLower(k)
+		if _k == "host" || _k == "connection" || _k == "proxy-connection" {
 			continue
 		}
 		//log.Printf("header %s: %s", k, v)
@@ -202,41 +301,53 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	}
 	var dp *dataProvider
 	var cdp *C.nghttp2_data_provider
-	if req.Body != nil {
-		dp, cdp = newDataProvider()
+	if req.Method == "PUT" || req.Method == "POST" || req.Method == "CONNECT" {
+		dp, cdp = newDataProvider(c.lock)
 		go func() {
 			io.Copy(dp, req.Body)
 			dp.Close()
 		}()
 	}
+
+	c.lock.Lock()
 	streamID := C.submit_request(c.session, nva.nv, C.size_t(nvIndex), cdp)
-	if dp != nil {
-		dp.streamID = int(streamID)
-		dp.session = c.session
-	}
+	c.lock.Unlock()
+
 	C.delete_nv_array(nva)
 	if int(streamID) < 0 {
 		return nil, fmt.Errorf("submit request error: %s",
 			C.GoString(C.nghttp2_strerror(streamID)))
 	}
-	//log.Println("stream id ", int(streamID))
+
+	//log.Printf("new stream, id %d", int(streamID))
+
+	if dp != nil {
+		dp.streamID = int(streamID)
+		dp.session = c.session
+	}
 	s := &ClientStream{
 		streamID: int(streamID),
+		conn:     c,
 		dp:       dp,
 		cdp:      cdp,
 		resch:    make(chan *http.Response),
 		errch:    make(chan error),
+		lock:     new(sync.Mutex),
 	}
 	c.lock.Lock()
 	c.streams[int(streamID)] = s
+	c.streamCount++
 	c.lock.Unlock()
 
 	select {
 	case err := <-s.errch:
 		return nil, err
 	case res := <-s.resch:
-		res.Request = req
-		return res, nil
+		if res != nil {
+			res.Request = req
+			return res, nil
+		}
+		return nil, io.EOF
 	case <-c.errch:
 		return nil, fmt.Errorf("connection error")
 	}
@@ -336,17 +447,14 @@ func (c *ServerConn) Close() error {
 
 // Run run the server loop
 func (c *ServerConn) Run() {
-	var wantRead int
 	var wantWrite int
 	var delay = 100 * time.Millisecond
 	var ret C.int
-	var shouldDelay bool
 
 	defer c.Close()
 	defer close(c.errch)
 
-	datach := make(chan []byte)
-	errch := make(chan error)
+	errch := make(chan struct{}, 5)
 
 	go func() {
 		buf := make([]byte, 16*1024)
@@ -355,15 +463,37 @@ func (c *ServerConn) Run() {
 			select {
 			case <-c.exitch:
 				break readloop
+			case <-errch:
+				break readloop
 			default:
 			}
 
 			n, err := c.conn.Read(buf)
 			if err != nil {
-				errch <- err
+				c.lock.Lock()
+				c.err = err
+				c.lock.Unlock()
+				errch <- struct{}{}
 				break
 			}
-			datach <- buf[:n]
+
+			d1 := C.CBytes(buf[:n])
+
+			c.lock.Lock()
+			ret1 := C.nghttp2_session_mem_recv(c.session,
+				(*C.uchar)(d1), C.size_t(n))
+			c.lock.Unlock()
+
+			C.free(d1)
+			if int(ret1) < 0 {
+				c.lock.Lock()
+				c.err = fmt.Errorf("sesion recv error: %s",
+					C.GoString(C.nghttp2_strerror(ret)))
+				c.lock.Unlock()
+				//log.Println(c.err)
+				errch <- struct{}{}
+				break
+			}
 		}
 	}()
 
@@ -372,50 +502,33 @@ loop:
 		select {
 		case <-c.errch:
 			break loop
-		case err := <-errch:
-			c.err = err
+		case <-errch:
 			break loop
 		case <-c.exitch:
 			break loop
 		default:
 		}
 
-		wantWrite = int(C.nghttp2_session_want_write(c.session))
-		if wantWrite != 0 {
-			ret = C.nghttp2_session_send(c.session)
-			if int(ret) < 0 {
-				c.err = fmt.Errorf("sesion send error: %s",
-					C.GoString(C.nghttp2_strerror(ret)))
-				//log.Println(c.err)
-				break
-			}
+		c.lock.Lock()
+		ret = C.nghttp2_session_send(c.session)
+		c.lock.Unlock()
+
+		if int(ret) < 0 {
+			c.lock.Lock()
+			c.err = fmt.Errorf("sesion send error: %s",
+				C.GoString(C.nghttp2_strerror(ret)))
+			c.lock.Unlock()
+			//log.Println(c.err)
+			errch <- struct{}{}
+			break
 		}
 
-		wantRead = int(C.nghttp2_session_want_read(c.session))
-		select {
-		case d := <-datach:
-			d1 := C.CBytes(d)
-			ret1 := C.nghttp2_session_mem_recv(c.session,
-				(*C.uchar)(d1), C.size_t(int(len(d))))
-			C.free(d1)
-			if int(ret1) < 0 {
-				c.err = fmt.Errorf("sesion recv error: %s",
-					C.GoString(C.nghttp2_strerror(ret)))
-				//log.Println(c.err)
-				break loop
-			}
-			shouldDelay = false
-		default:
-			// want read but data not avaliable
-			if wantRead != 0 {
-				shouldDelay = true
-			}
-		}
-
+		c.lock.Lock()
 		wantWrite = int(C.nghttp2_session_want_write(c.session))
+		c.lock.Unlock()
 
 		// make delay when no data read/write
-		if (shouldDelay || wantRead == 0) && wantWrite == 0 {
+		if wantWrite == 0 {
 			time.Sleep(delay)
 		}
 	}

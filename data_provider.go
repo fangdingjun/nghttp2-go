@@ -6,6 +6,7 @@ package nghttp2
 import "C"
 import (
 	"bytes"
+	"io"
 	"sync"
 	"time"
 	"unsafe"
@@ -19,8 +20,10 @@ type dataProvider struct {
 	buf      *bytes.Buffer
 	closed   bool
 	lock     *sync.Mutex
+	sessLock *sync.Mutex
 	session  *C.nghttp2_session
 	streamID int
+	deferred bool
 }
 
 // Read read from data provider
@@ -39,7 +42,15 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
-	C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+	if dp.closed {
+		return 0, io.EOF
+	}
+	if dp.deferred {
+		dp.sessLock.Lock()
+		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+		dp.sessLock.Unlock()
+		dp.deferred = false
+	}
 	return dp.buf.Write(buf)
 }
 
@@ -47,16 +58,26 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 func (dp *dataProvider) Close() error {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
+	if dp.closed {
+		return nil
+	}
 	dp.closed = true
-	C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+	//log.Printf("dp close stream %d", dp.streamID)
+	if dp.deferred {
+		dp.sessLock.Lock()
+		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+		dp.sessLock.Unlock()
+		dp.deferred = false
+	}
 	return nil
 }
 
-func newDataProvider() (
+func newDataProvider(sessionLock *sync.Mutex) (
 	*dataProvider, *C.nghttp2_data_provider) {
 	dp := &dataProvider{
-		buf:  new(bytes.Buffer),
-		lock: new(sync.Mutex),
+		buf:      new(bytes.Buffer),
+		lock:     new(sync.Mutex),
+		sessLock: sessionLock,
 	}
 	cdp := C.new_data_provider(C.size_t(uintptr(unsafe.Pointer(dp))))
 	return dp, cdp
