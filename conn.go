@@ -284,15 +284,21 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	setNvArray(nva, nvIndex, ":authority", req.Host, 0)
 	nvIndex++
 
+	/*
+		:path must starts with "/"
+		req.RequestURI maybe starts with http://
+	*/
 	p := req.URL.Path
 	q := req.URL.Query().Encode()
 	if q != "" {
 		p = p + "?" + q
 	}
+
 	if req.Method != "CONNECT" {
 		setNvArray(nva, nvIndex, ":path", p, 0)
 		nvIndex++
 	}
+
 	//log.Printf("%s http://%s%s", req.Method, req.Host, p)
 	for k, v := range req.Header {
 		//log.Printf("header %s: %s\n", k, v[0])
@@ -304,8 +310,10 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 		setNvArray(nva, nvIndex, strings.Title(k), v[0], 0)
 		nvIndex++
 	}
+
 	var dp *dataProvider
 	var cdp *C.nghttp2_data_provider
+
 	if req.Method == "PUT" || req.Method == "POST" || req.Method == "CONNECT" {
 		dp, cdp = newDataProvider(c.lock)
 		go func() {
@@ -320,6 +328,7 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	c.lock.Unlock()
 
 	C.delete_nv_array(nva)
+
 	if int(streamID) < 0 {
 		return nil, fmt.Errorf("submit request error: %s",
 			C.GoString(C.nghttp2_strerror(streamID)))
@@ -331,6 +340,7 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 		dp.streamID = int(streamID)
 		dp.session = c.session
 	}
+
 	s := &ClientStream{
 		streamID: int(streamID),
 		conn:     c,
@@ -340,11 +350,13 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 		errch:    make(chan error),
 		lock:     new(sync.Mutex),
 	}
+
 	c.lock.Lock()
 	c.streams[int(streamID)] = s
 	c.streamCount++
 	c.lock.Unlock()
 
+	// waiting for response from server
 	select {
 	case err := <-s.errch:
 		return nil, err
@@ -422,10 +434,13 @@ func Server(c net.Conn, handler http.Handler) (*ServerConn, error) {
 		errch:   make(chan struct{}),
 		exitch:  make(chan struct{}),
 	}
-	conn.session = C.init_nghttp2_server_session(C.size_t(uintptr(unsafe.Pointer(conn))))
+
+	conn.session = C.init_nghttp2_server_session(
+		C.size_t(uintptr(unsafe.Pointer(conn))))
 	if conn.session == nil {
 		return nil, fmt.Errorf("init session failed")
 	}
+
 	//log.Println("send server connection header")
 	ret := C.send_server_connection_header(conn.session)
 	if int(ret) < 0 {
@@ -441,9 +456,12 @@ func (c *ServerConn) serve(s *ServerStream) {
 	if c.Handler == nil {
 		handler = http.DefaultServeMux
 	}
+
 	if s.req.URL == nil {
 		s.req.URL = &url.URL{}
 	}
+
+	// call http.Handler to serve request
 	handler.ServeHTTP(s, s.req)
 	s.Close()
 }
@@ -454,6 +472,7 @@ func (c *ServerConn) Close() error {
 		return nil
 	}
 	c.closed = true
+
 	for _, s := range c.streams {
 		s.Close()
 	}
@@ -465,6 +484,7 @@ func (c *ServerConn) Close() error {
 	C.nghttp2_session_del(c.session)
 	close(c.exitch)
 	c.conn.Close()
+
 	return nil
 }
 

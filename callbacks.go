@@ -286,6 +286,7 @@ func onClientDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 	return C.ssize_t(n)
 }
 */
+
 // onClientDataSendCallback callback function for libnghttp2 library want send data to network.
 //
 //export onClientDataSendCallback
@@ -422,8 +423,12 @@ func onClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 func onClientConnectionCloseCallback(ptr unsafe.Pointer) {
 	conn := (*ClientConn)(ptr)
 	conn.err = io.EOF
-	select {
-	case conn.exitch <- struct{}{}:
-	default:
+
+	// signal all goroutings exit
+	for i := 0; i < 4; i++ {
+		select {
+		case conn.exitch <- struct{}{}:
+		default:
+		}
 	}
 }

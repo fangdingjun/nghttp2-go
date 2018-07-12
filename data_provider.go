@@ -42,13 +42,16 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
+
 	if dp.closed {
 		return 0, io.EOF
 	}
+
 	if dp.deferred {
 		dp.sessLock.Lock()
 		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
 		dp.sessLock.Unlock()
+
 		dp.deferred = false
 	}
 	return dp.buf.Write(buf)
@@ -58,6 +61,7 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 func (dp *dataProvider) Close() error {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
+
 	if dp.closed {
 		return nil
 	}
@@ -67,6 +71,7 @@ func (dp *dataProvider) Close() error {
 		dp.sessLock.Lock()
 		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
 		dp.sessLock.Unlock()
+
 		dp.deferred = false
 	}
 	return nil
@@ -95,6 +100,7 @@ type bodyProvider struct {
 // will block when data not yet avaliable
 func (bp *bodyProvider) Read(buf []byte) (int, error) {
 	var delay = 100 * time.Millisecond
+
 	for {
 		bp.lock.Lock()
 		n, err := bp.buf.Read(buf)
@@ -112,6 +118,7 @@ func (bp *bodyProvider) Read(buf []byte) (int, error) {
 func (bp *bodyProvider) Write(buf []byte) (int, error) {
 	bp.lock.Lock()
 	defer bp.lock.Unlock()
+
 	return bp.buf.Write(buf)
 }
 
@@ -119,6 +126,7 @@ func (bp *bodyProvider) Write(buf []byte) (int, error) {
 func (bp *bodyProvider) Close() error {
 	bp.lock.Lock()
 	defer bp.lock.Unlock()
+
 	bp.closed = true
 	return nil
 }

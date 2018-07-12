@@ -138,14 +138,19 @@ func (s *ServerStream) WriteHeader(code int) {
 	if s.closed {
 		return
 	}
+
 	if s.responseSend {
 		return
 	}
+
 	s.responseSend = true
 	s.statusCode = code
+
 	nvIndex := 0
 	nvMax := 25
+
 	nva := C.new_nv_array(C.size_t(nvMax))
+
 	setNvArray(nva, nvIndex, ":status", fmt.Sprintf("%d", code), 0)
 	nvIndex++
 
@@ -157,11 +162,14 @@ func (s *ServerStream) WriteHeader(code int) {
 		setNvArray(nva, nvIndex, strings.Title(k), v[0], 0)
 		nvIndex++
 	}
+
 	var dp *dataProvider
 	var cdp *C.nghttp2_data_provider
+
 	dp, cdp = newDataProvider(s.conn.lock)
 	dp.streamID = s.streamID
 	dp.session = s.conn.session
+
 	s.dp = dp
 	s.cdp = cdp
 
@@ -172,7 +180,8 @@ func (s *ServerStream) WriteHeader(code int) {
 
 	C.delete_nv_array(nva)
 	if int(ret) < 0 {
-		panic(fmt.Sprintf("sumit response error %s", C.GoString(C.nghttp2_strerror(ret))))
+		panic(fmt.Sprintf("sumit response error %s",
+			C.GoString(C.nghttp2_strerror(ret))))
 	}
 	//log.Printf("stream %d send response", s.streamID)
 }
@@ -192,14 +201,17 @@ func (s *ServerStream) Close() error {
 		return nil
 	}
 	s.closed = true
+
 	//C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
 	if s.req.Body != nil {
 		s.req.Body.Close()
 	}
+
 	if s.dp != nil {
 		s.dp.Close()
 		s.dp = nil
 	}
+
 	if s.cdp != nil {
 		C.free(unsafe.Pointer(s.cdp))
 		s.cdp = nil
@@ -207,6 +219,7 @@ func (s *ServerStream) Close() error {
 
 	s.conn.lock.Lock()
 	s.conn.lock.Unlock()
+
 	if _, ok := s.conn.streams[s.streamID]; ok {
 		delete(s.conn.streams, s.streamID)
 	}
