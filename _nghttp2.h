@@ -15,6 +15,7 @@ extern int onClientBeginHeaderCallback(void *, int);
 extern int onClientHeaderCallback(void *, int, void *, int, void *, int);
 extern int onClientHeadersDoneCallback(void *, int);
 extern int onClientStreamClose(void *, int);
+extern void onClientConnectionCloseCallback(void *user_data);
 
 extern ssize_t onServerDataRecvCallback(void *, void *data, size_t);
 extern ssize_t onServerDataSendCallback(void *, void *data, size_t);

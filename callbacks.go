@@ -23,6 +23,7 @@ const (
 	NGHTTP2_ERR_DEFERRED                  = -508
 )
 
+/*
 // onServerDataRecvCallback callback function for libnghttp2 library
 // want receive data from network.
 //
@@ -40,6 +41,7 @@ func onServerDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 	C.memcpy(data, cbuf, C.size_t(n))
 	return C.ssize_t(n)
 }
+*/
 
 // onServerDataSendCallback callback function for libnghttp2 library
 // want send data to network.
@@ -98,7 +100,10 @@ func onServerBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 		},
 		//buf: new(bytes.Buffer),
 	}
+	//conn.lock.Lock()
 	conn.streams[int(streamID)] = s
+	//conn.lock.Unlock()
+
 	return NGHTTP2_NO_ERROR
 }
 
@@ -190,9 +195,9 @@ func onServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
-	conn.lock.Lock()
+	//conn.lock.Lock()
 	delete(conn.streams, int(streamID))
-	conn.lock.Unlock()
+	//conn.lock.Unlock()
 	s.Close()
 	return NGHTTP2_NO_ERROR
 }
@@ -205,22 +210,27 @@ func onServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 //export onDataSourceReadCallback
 func onDataSourceReadCallback(ptr unsafe.Pointer,
 	buf unsafe.Pointer, length C.size_t) C.ssize_t {
-	//log.Println("data source read")
+	//log.Println("onDataSourceReadCallback begin")
 	dp := (*dataProvider)(ptr)
 	gobuf := make([]byte, int(length))
 	n, err := dp.Read(gobuf)
 	if err != nil {
 		if err == io.EOF {
+			//log.Println("onDataSourceReadCallback end")
 			return 0
 		}
 		if err == errAgain {
+			//log.Println("onDataSourceReadCallback end")
+			dp.deferred = true
 			return NGHTTP2_ERR_DEFERRED
 		}
+		//log.Println("onDataSourceReadCallback end")
 		return NGHTTP2_ERR_CALLBACK_FAILURE
 	}
 	cbuf := C.CBytes(gobuf)
 	defer C.free(cbuf)
 	C.memcpy(buf, cbuf, C.size_t(n))
+	//log.Println("onDataSourceReadCallback end")
 	return C.ssize_t(n)
 }
 
@@ -229,16 +239,18 @@ func onDataSourceReadCallback(ptr unsafe.Pointer,
 //export onClientDataChunkRecv
 func onClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	buf unsafe.Pointer, length C.size_t) C.int {
-	//log.Println("on data recv")
+	//log.Println("onClientDataChunkRecv begin")
 	conn := (*ClientConn)(ptr)
 	gobuf := C.GoBytes(buf, C.int(length))
 
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
+		//log.Println("onClientDataChunkRecv end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
 	if s.res.Body == nil {
 		//log.Println("empty body")
+		//log.Println("onClientDataChunkRecv end")
 		return C.int(length)
 	}
 
@@ -247,11 +259,14 @@ func onClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 		if err != nil {
 			return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 		}
+		//log.Println("onClientDataChunkRecv end")
 		return C.int(n)
 	}
+	//log.Println("onClientDataChunkRecv end")
 	return C.int(length)
 }
 
+/*
 // onClientDataRecvCallback callback function for libnghttp2 library want read data from network.
 //
 //export onClientDataRecvCallback
@@ -270,20 +285,23 @@ func onClientDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 	C.memcpy(data, cbuf, C.size_t(n))
 	return C.ssize_t(n)
 }
-
+*/
 // onClientDataSendCallback callback function for libnghttp2 library want send data to network.
 //
 //export onClientDataSendCallback
 func onClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
+	//log.Println("onClientDataSendCallback begin")
 	//log.Println("data write req ", int(size))
 	conn := (*ClientConn)(ptr)
 	buf := C.GoBytes(data, C.int(size))
 	//log.Println(conn.conn.RemoteAddr())
 	n, err := conn.conn.Write(buf)
 	if err != nil {
+		//log.Println("onClientDataSendCallback end")
 		return NGHTTP2_ERR_CALLBACK_FAILURE
 	}
-	//log.Println("write data to network ", n)
+	//log.Printf("write %d bytes to network ", n)
+	//log.Println("onClientDataSendCallback end")
 	return C.ssize_t(n)
 }
 
@@ -291,11 +309,13 @@ func onClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 //
 //export onClientBeginHeaderCallback
 func onClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	//log.Println("begin header")
+	//log.Println("onClientBeginHeaderCallback begin")
+	//log.Printf("stream %d begin headers", int(streamID))
 	conn := (*ClientConn)(ptr)
 
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
+		//log.Println("onClientBeginHeaderCallback end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
 	var TLS tls.ConnectionState
@@ -310,6 +330,7 @@ func onClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 		},
 		TLS: &TLS,
 	}
+	//log.Println("onClientBeginHeaderCallback end")
 	return NGHTTP2_NO_ERROR
 }
 
@@ -319,6 +340,7 @@ func onClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
 	value unsafe.Pointer, valuelen C.int) C.int {
+	//log.Println("onClientHeaderCallback begin")
 	//log.Println("header")
 	conn := (*ClientConn)(ptr)
 	goname := string(C.GoBytes(name, namelen))
@@ -326,6 +348,7 @@ func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
+		//log.Println("onClientHeaderCallback end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
 	goname = strings.ToLower(goname)
@@ -349,6 +372,7 @@ func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	default:
 		s.res.Header.Add(goname, govalue)
 	}
+	//log.Println("onClientHeaderCallback end")
 	return NGHTTP2_NO_ERROR
 }
 
@@ -356,13 +380,19 @@ func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 //
 //export onClientHeadersDoneCallback
 func onClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	//log.Println("frame recv")
+	//log.Println("onClientHeadersDoneCallback begin")
+	//log.Printf("stream %d headers done", int(streamID))
 	conn := (*ClientConn)(ptr)
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
+		//log.Println("onClientHeadersDoneCallback end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
-	s.resch <- s.res
+	select {
+	case s.resch <- s.res:
+	default:
+	}
+	//log.Println("onClientHeadersDoneCallback end")
 	return NGHTTP2_NO_ERROR
 }
 
@@ -370,16 +400,30 @@ func onClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 //
 //export onClientStreamClose
 func onClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
-	//log.Println("stream close")
+	//log.Println("onClientStreamClose begin")
+	//log.Printf("stream %d closed", int(streamID))
 	conn := (*ClientConn)(ptr)
 
 	stream, ok := conn.streams[int(streamID)]
 	if ok {
 		stream.Close()
-		conn.lock.Lock()
+		//conn.lock.Lock()
 		delete(conn.streams, int(streamID))
-		conn.lock.Unlock()
+		//go stream.Close()
+		//conn.lock.Unlock()
+		//log.Println("onClientStreamClose end")
 		return NGHTTP2_NO_ERROR
 	}
+	//log.Println("onClientStreamClose end")
 	return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+}
+
+//export onClientConnectionCloseCallback
+func onClientConnectionCloseCallback(ptr unsafe.Pointer) {
+	conn := (*ClientConn)(ptr)
+	conn.err = io.EOF
+	select {
+	case conn.exitch <- struct{}{}:
+	default:
+	}
 }

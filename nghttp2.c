@@ -1,5 +1,7 @@
 #include "_nghttp2.h"
 
+int on_error_callback(nghttp2_session *session, const char *msg, size_t len, void *user_data);
+
 static ssize_t server_send_callback(nghttp2_session *session,
                                     const uint8_t *data, size_t length,
                                     int flags, void *user_data)
@@ -104,6 +106,7 @@ nghttp2_session *init_nghttp2_server_session(size_t data)
     nghttp2_session_callbacks_set_on_header_callback(callbacks,
                                                      on_server_header_callback);
 
+    nghttp2_session_callbacks_set_error_callback(callbacks, on_error_callback);
     nghttp2_session_callbacks_set_on_begin_headers_callback(
         callbacks, on_server_begin_headers_callback);
 
@@ -116,7 +119,7 @@ nghttp2_session *init_nghttp2_server_session(size_t data)
 int send_server_connection_header(nghttp2_session *session)
 {
     nghttp2_settings_entry iv[1] = {
-        {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}};
+        {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 1000}};
     int rv;
 
     rv = nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv,
@@ -137,13 +140,14 @@ static ssize_t client_send_callback(nghttp2_session *session, const uint8_t *dat
 {
     return onClientDataSendCallback(user_data, (void *)data, length);
 }
-
+/*
 // recv_callback read data from network
 static ssize_t client_recv_callback(nghttp2_session *session, uint8_t *buf,
                                     size_t length, int flags, void *user_data)
 {
     return onClientDataRecvCallback(user_data, (void *)buf, length);
 }
+*/
 
 static int on_client_header_callback(nghttp2_session *session,
                                      const nghttp2_frame *frame, const uint8_t *name,
@@ -246,10 +250,14 @@ static int on_client_frame_recv_callback(nghttp2_session *session,
         }
         break;
     case NGHTTP2_RST_STREAM:
-        printf("server send rst_stream %d\n", frame->rst_stream.error_code);
+        //printf("server send rst_stream %d\n", frame->rst_stream.error_code);
         break;
     case NGHTTP2_GOAWAY:
-        printf("server send go away\n");
+        //printf("server send go away\n");
+        onClientConnectionCloseCallback(user_data);
+        break;
+    case NGHTTP2_PING:
+        //printf("ping frame received\n");
         break;
     }
     return 0;
@@ -280,18 +288,18 @@ static ssize_t data_source_read_callback(nghttp2_session *session, int32_t strea
     }
     return ret;
 }
-int on_error_callback(nghttp2_session *session, int lib_error_code,
+int on_error_callback(nghttp2_session *session,
                       const char *msg, size_t len, void *user_data)
 {
     //printf("errmsg %*s\n", msg, len);
-    printf("code: %d, error: %s\n", lib_error_code, nghttp2_strerror(lib_error_code));
+    printf("error: %s\n", msg);
     return 0;
 }
 
 void init_client_callbacks(nghttp2_session_callbacks *callbacks)
 {
     nghttp2_session_callbacks_set_send_callback(callbacks, client_send_callback);
-    nghttp2_session_callbacks_set_recv_callback(callbacks, client_recv_callback);
+    //nghttp2_session_callbacks_set_recv_callback(callbacks, client_recv_callback);
 
     //nghttp2_session_callbacks_set_error_callback2(callbacks, on_error_callback);
     nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(callbacks, on_invalid_frame_recv_callback);
