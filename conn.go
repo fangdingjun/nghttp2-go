@@ -68,16 +68,18 @@ func (c *ClientConn) Error() error {
 
 // Close close the http2 connection
 func (c *ClientConn) Close() error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	if c.closed {
 		return nil
 	}
-	//log.Println("close client connection")
 	c.closed = true
+
 	for _, s := range c.streams {
 		s.Close()
 	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	//log.Println("close client connection")
 	C.nghttp2_session_terminate_session(c.session, 0)
 	C.nghttp2_session_del(c.session)
 	close(c.exitch)
@@ -428,20 +430,21 @@ func (c *ServerConn) serve(s *ServerStream) {
 
 // Close close the server connection
 func (c *ServerConn) Close() error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
 	if c.closed {
 		return nil
 	}
+	c.closed = true
 	for _, s := range c.streams {
 		s.Close()
 	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	C.nghttp2_session_terminate_session(c.session, 0)
 	C.nghttp2_session_del(c.session)
 	close(c.exitch)
 	c.conn.Close()
-	c.closed = true
 	return nil
 }
 

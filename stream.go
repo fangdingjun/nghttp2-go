@@ -89,11 +89,11 @@ func (s *ClientStream) Close() error {
 		s.cdp = nil
 	}
 
-	//s.conn.lock.Lock()
-	//defer s.conn.lock.Unlock()
-	//if _, ok := s.conn.streams[s.streamID]; ok {
-	//delete(s.conn.streams, s.streamID)
-	//}
+	s.conn.lock.Lock()
+	defer s.conn.lock.Unlock()
+	if _, ok := s.conn.streams[s.streamID]; ok {
+		delete(s.conn.streams, s.streamID)
+	}
 	return nil
 }
 
@@ -208,6 +208,12 @@ func (s *ServerStream) Close() error {
 	if s.cdp != nil {
 		C.free(unsafe.Pointer(s.cdp))
 		s.cdp = nil
+	}
+
+	s.conn.lock.Lock()
+	s.conn.lock.Unlock()
+	if _, ok := s.conn.streams[s.streamID]; ok {
+		delete(s.conn.streams, s.streamID)
 	}
 	//log.Printf("stream %d closed", s.streamID)
 	return nil

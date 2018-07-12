@@ -198,7 +198,7 @@ func onServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	//conn.lock.Lock()
 	delete(conn.streams, int(streamID))
 	//conn.lock.Unlock()
-	s.Close()
+	go s.Close()
 	return NGHTTP2_NO_ERROR
 }
 
@@ -406,7 +406,7 @@ func onClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 
 	stream, ok := conn.streams[int(streamID)]
 	if ok {
-		stream.Close()
+		go stream.Close()
 		//conn.lock.Lock()
 		delete(conn.streams, int(streamID))
 		//go stream.Close()
