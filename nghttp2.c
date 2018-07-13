@@ -133,13 +133,6 @@ int send_server_connection_header(nghttp2_session *session)
     rv = nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv,
                                  ARRLEN(iv));
     return rv;
-    /*
-  if (rv != 0) {
-    // warnx("Fatal error: %s", nghttp2_strerror(rv));
-    return rv;
-  }
-  return 0;
-  */
 }
 
 // send_callback send data to network
@@ -148,14 +141,6 @@ static ssize_t client_send_callback(nghttp2_session *session, const uint8_t *dat
 {
     return onClientDataSendCallback(user_data, (void *)data, length);
 }
-/*
-// recv_callback read data from network
-static ssize_t client_recv_callback(nghttp2_session *session, uint8_t *buf,
-                                    size_t length, int flags, void *user_data)
-{
-    return onClientDataRecvCallback(user_data, (void *)buf, length);
-}
-*/
 
 static int on_client_header_callback(nghttp2_session *session,
                                      const nghttp2_frame *frame, const uint8_t *name,
@@ -286,11 +271,23 @@ static int on_client_stream_close_callback(nghttp2_session *session, int32_t str
     return 0;
 }
 
-static ssize_t data_source_read_callback(nghttp2_session *session, int32_t stream_id,
-                                         uint8_t *buf, size_t length, uint32_t *data_flags,
-                                         nghttp2_data_source *source, void *user_data)
+static ssize_t on_client_data_source_read_callback(nghttp2_session *session, int32_t stream_id,
+                                                   uint8_t *buf, size_t length, uint32_t *data_flags,
+                                                   nghttp2_data_source *source, void *user_data)
 {
-    int ret = onDataSourceReadCallback(source->ptr, buf, length);
+    int ret = onClientDataSourceReadCallback(user_data, stream_id, buf, length);
+    if (ret == 0)
+    {
+        *data_flags = NGHTTP2_DATA_FLAG_EOF;
+    }
+    return ret;
+}
+
+static ssize_t on_server_data_source_read_callback(nghttp2_session *session, int32_t stream_id,
+                                                   uint8_t *buf, size_t length, uint32_t *data_flags,
+                                                   nghttp2_data_source *source, void *user_data)
+{
+    int ret = onServerDataSourceReadCallback(user_data, stream_id, buf, length);
     if (ret == 0)
     {
         *data_flags = NGHTTP2_DATA_FLAG_EOF;
@@ -403,57 +400,31 @@ int32_t submit_request(nghttp2_session *session, nghttp2_nv *hdrs, size_t hdrlen
 }
 #endif
 
-struct nv_array *new_nv_array(size_t n)
+int data_provider_set_callback(size_t cdp, size_t data, int type)
 {
-    struct nv_array *a = malloc(sizeof(struct nv_array));
-    nghttp2_nv *nv = (nghttp2_nv *)malloc(n * sizeof(nghttp2_nv));
-    memset(nv, 0, n * sizeof(nghttp2_nv));
-    a->nv = nv;
-    a->len = n;
-    return a;
-}
-
-int nv_array_set(struct nv_array *a, int index,
-                 char *name, char *value,
-                 size_t namelen, size_t valuelen, int flag)
-{
-    if (index > (a->len - 1))
+    //nghttp2_data_provider *dp = malloc(sizeof(nghttp2_data_provider));
+    nghttp2_data_provider *dp = (nghttp2_data_provider *)cdp;
+    dp->source.ptr = (void *)((int *)data);
+    if (type == 0)
     {
-        return -1;
+        dp->read_callback = on_server_data_source_read_callback;
     }
-    nghttp2_nv *nv = &((a->nv)[index]);
-    nv->name = name;
-    nv->value = value;
-    nv->namelen = namelen;
-    nv->valuelen = valuelen;
-    nv->flags = flag;
+    else
+    {
+        dp->read_callback = on_client_data_source_read_callback;
+    }
     return 0;
 }
 
-void delete_nv_array(struct nv_array *a)
+int _nghttp2_submit_response(nghttp2_session *sess, int streamid,
+                             size_t nv, size_t nvlen, nghttp2_data_provider *dp)
 {
-    int i;
-    nghttp2_nv *nv;
-    for (i = 0; i < a->len; i++)
-    {
-        nv = &((a->nv)[i]);
-        if (nv->name != NULL)
-        {
-            free(nv->name);
-        }
-        if (nv->value != NULL)
-        {
-            free(nv->value);
-        }
-    }
-    free(a->nv);
-    free(a);
+    return nghttp2_submit_response(sess, streamid, (nghttp2_nv *)nv, nvlen, dp);
 }
 
-nghttp2_data_provider *new_data_provider(size_t data)
+int _nghttp2_submit_request(nghttp2_session *session, const nghttp2_priority_spec *pri_spec,
+                            size_t nva, size_t nvlen,
+                            const nghttp2_data_provider *data_prd, void *stream_user_data)
 {
-    nghttp2_data_provider *dp = malloc(sizeof(nghttp2_data_provider));
-    dp->source.ptr = (void *)((int *)data);
-    dp->read_callback = data_source_read_callback;
-    return dp;
+    return nghttp2_submit_request(session, pri_spec, (nghttp2_nv *)nva, nvlen, data_prd, stream_user_data);
 }

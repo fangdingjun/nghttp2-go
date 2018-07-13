@@ -9,13 +9,21 @@
 
 extern ssize_t onClientDataRecvCallback(void *, void *data, size_t);
 extern ssize_t onClientDataSendCallback(void *, void *data, size_t);
-extern ssize_t onDataSourceReadCallback(void *, void *, size_t);
+extern ssize_t onServerDataSourceReadCallback(void *, int, void *, size_t);
+extern ssize_t onClientDataSourceReadCallback(void *, int, void *, size_t);
 extern int onClientDataChunkRecv(void *, int, void *, size_t);
 extern int onClientBeginHeaderCallback(void *, int);
 extern int onClientHeaderCallback(void *, int, void *, int, void *, int);
 extern int onClientHeadersDoneCallback(void *, int);
 extern int onClientStreamClose(void *, int);
 extern void onClientConnectionCloseCallback(void *user_data);
+
+int _nghttp2_submit_response(nghttp2_session *sess, int streamid,
+                             size_t nv, size_t nvlen, nghttp2_data_provider *dp);
+
+int _nghttp2_submit_request(nghttp2_session *session, const nghttp2_priority_spec *pri_spec,
+                            size_t nva, size_t nvlen,
+                            const nghttp2_data_provider *data_prd, void *stream_user_data);
 
 extern ssize_t onServerDataRecvCallback(void *, void *data, size_t);
 extern ssize_t onServerDataSendCallback(void *, void *data, size_t);
@@ -34,7 +42,7 @@ struct nv_array
 };
 
 void delete_nv_array(struct nv_array *a);
-nghttp2_data_provider *new_data_provider(size_t data);
+int data_provider_set_callback(size_t dp, size_t data, int t);
 
 int nv_array_set(struct nv_array *a, int index,
                  char *name, char *value,

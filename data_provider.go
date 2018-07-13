@@ -6,7 +6,9 @@ package nghttp2
 import "C"
 import (
 	"bytes"
+	"errors"
 	"io"
+	"log"
 	"sync"
 	"time"
 	"unsafe"
@@ -28,6 +30,10 @@ type dataProvider struct {
 
 // Read read from data provider
 func (dp *dataProvider) Read(buf []byte) (n int, err error) {
+	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+		log.Println("db read invalid state")
+		return 0, errors.New("invalid state")
+	}
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
@@ -40,6 +46,10 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 
 // Write provider data for data provider
 func (dp *dataProvider) Write(buf []byte) (n int, err error) {
+	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+		log.Println("dp write invalid state")
+		return 0, errors.New("invalid state")
+	}
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
@@ -59,6 +69,10 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 
 // Close end to provide data
 func (dp *dataProvider) Close() error {
+	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+		log.Println("dp close, invalid state")
+		return errors.New("invalid state")
+	}
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
@@ -77,15 +91,15 @@ func (dp *dataProvider) Close() error {
 	return nil
 }
 
-func newDataProvider(sessionLock *sync.Mutex) (
-	*dataProvider, *C.nghttp2_data_provider) {
+func newDataProvider(cdp unsafe.Pointer, sessionLock *sync.Mutex, t int) *dataProvider {
 	dp := &dataProvider{
 		buf:      new(bytes.Buffer),
 		lock:     new(sync.Mutex),
 		sessLock: sessionLock,
 	}
-	cdp := C.new_data_provider(C.size_t(uintptr(unsafe.Pointer(dp))))
-	return dp, cdp
+	C.data_provider_set_callback(C.size_t(uintptr(cdp)),
+		C.size_t(uintptr(unsafe.Pointer(dp))), C.int(t))
+	return dp
 }
 
 // bodyProvider provide data for http body
@@ -129,19 +143,4 @@ func (bp *bodyProvider) Close() error {
 
 	bp.closed = true
 	return nil
-}
-
-// setNvArray set the array for nghttp2_nv array
-func setNvArray(a *C.struct_nv_array, index int,
-	name, value string, flags int) {
-	cname := C.CString(name)
-	cvalue := C.CString(value)
-	cnamelen := C.size_t(len(name))
-	cvaluelen := C.size_t(len(value))
-	cflags := C.int(flags)
-
-	// note: cname and cvalue will freed in C.delete_nv_array
-
-	C.nv_array_set(a, C.int(index), cname,
-		cvalue, cnamelen, cvaluelen, cflags)
 }

@@ -7,6 +7,7 @@ import "C"
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,17 +18,13 @@ import (
 type ClientStream struct {
 	streamID int
 	conn     *ClientConn
-	cdp      *C.nghttp2_data_provider
+	cdp      C.nghttp2_data_provider
 	dp       *dataProvider
-	// application read data from stream
-	//r *io.PipeReader
-	// recv stream data from session
-	//w      *io.PipeWriter
-	res    *http.Response
-	resch  chan *http.Response
-	errch  chan error
-	closed bool
-	lock   *sync.Mutex
+	res      *http.Response
+	resch    chan *http.Response
+	errch    chan error
+	closed   bool
+	lock     *sync.Mutex
 }
 
 // Read read stream data
@@ -63,33 +60,21 @@ func (s *ClientStream) Close() error {
 	case s.errch <- err:
 	default:
 	}
-	//log.Println("close stream resch")
-	//close(s.resch)
-	//log.Println("close stream errch")
-	//close(s.errch)
-	//log.Println("close pipe w")
 	if s.res != nil && s.res.Body != nil {
 		s.res.Body.Close()
 	}
 	//log.Println("close stream done")
 	if s.dp != nil {
 		s.dp.Close()
-		//s.conn.lock.Lock()
-		//C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
-		//s.conn.lock.Unlock()
-		s.dp = nil
-	}
-	if s.cdp != nil {
-		C.free(unsafe.Pointer(s.cdp))
-		s.cdp = nil
 	}
 
-	s.conn.lock.Lock()
-	if _, ok := s.conn.streams[s.streamID]; ok {
-		delete(s.conn.streams, s.streamID)
+	if s.res != nil && s.res.Request != nil &&
+		s.res.Request.Method == "CONNECT" {
+		//log.Printf("send rst stream for %d", s.streamID)
+		s.conn.lock.Lock()
+		C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
+		s.conn.lock.Unlock()
 	}
-	s.conn.lock.Unlock()
-
 	return nil
 }
 
@@ -114,7 +99,7 @@ type ServerStream struct {
 
 	// data provider
 	dp  *dataProvider
-	cdp *C.nghttp2_data_provider
+	cdp C.nghttp2_data_provider
 
 	closed bool
 	//buf    *bytes.Buffer
@@ -147,39 +132,35 @@ func (s *ServerStream) WriteHeader(code int) {
 	s.responseSend = true
 	s.statusCode = code
 
-	nvIndex := 0
-	nvMax := 25
+	var nv = []C.nghttp2_nv{}
 
-	nva := C.new_nv_array(C.size_t(nvMax))
-
-	setNvArray(nva, nvIndex, ":status", fmt.Sprintf("%d", code), 0)
-	nvIndex++
+	nv = append(nv, newNV(":status", fmt.Sprintf("%d", code)))
 
 	for k, v := range s.header {
-		if strings.ToLower(k) == "host" {
+		//log.Println(k, v[0])
+		_k := strings.ToLower(k)
+		if _k == "host" || _k == "connection" || _k == "proxy-connection" ||
+			_k == "transfer-encoding" {
 			continue
 		}
-		//log.Printf("header %s: %s", k, v)
-		setNvArray(nva, nvIndex, strings.Title(k), v[0], 0)
-		nvIndex++
+		nv = append(nv, newNV(k, v[0]))
 	}
 
 	var dp *dataProvider
-	var cdp *C.nghttp2_data_provider
 
-	dp, cdp = newDataProvider(s.conn.lock)
+	dp = newDataProvider(unsafe.Pointer(&s.cdp), s.conn.lock, 0)
 	dp.streamID = s.streamID
 	dp.session = s.conn.session
 
 	s.dp = dp
-	s.cdp = cdp
 
 	s.conn.lock.Lock()
-	ret := C.nghttp2_submit_response(
-		s.conn.session, C.int(s.streamID), nva.nv, C.size_t(nvIndex), cdp)
+	ret := C._nghttp2_submit_response(
+		s.conn.session, C.int(s.streamID),
+		C.size_t(uintptr(unsafe.Pointer(&nv[0]))),
+		C.size_t(len(nv)), &s.cdp)
 	s.conn.lock.Unlock()
 
-	C.delete_nv_array(nva)
 	if int(ret) < 0 {
 		panic(fmt.Sprintf("sumit response error %s",
 			C.GoString(C.nghttp2_strerror(ret))))
@@ -203,26 +184,24 @@ func (s *ServerStream) Close() error {
 	}
 	s.closed = true
 
-	//C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
 	if s.req.Body != nil {
 		s.req.Body.Close()
 	}
 
 	if s.dp != nil {
 		s.dp.Close()
-		s.dp = nil
+		//s.dp = nil
 	}
 
-	if s.cdp != nil {
-		C.free(unsafe.Pointer(s.cdp))
-		s.cdp = nil
-	}
+	if s.req.Method == "CONNECT" {
+		s.conn.lock.Lock()
+		s.conn.lock.Unlock()
 
-	s.conn.lock.Lock()
-	s.conn.lock.Unlock()
-
-	if _, ok := s.conn.streams[s.streamID]; ok {
-		delete(s.conn.streams, s.streamID)
+		if _, ok := s.conn.streams[s.streamID]; ok {
+			log.Printf("send rst stream %d", s.streamID)
+			C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
+			delete(s.conn.streams, s.streamID)
+		}
 	}
 	//log.Printf("stream %d closed", s.streamID)
 	return nil

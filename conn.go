@@ -123,14 +123,16 @@ func (c *ClientConn) run() {
 			}
 			//log.Printf("read %d bytes from network", n)
 			lastDataRecv = time.Now()
-			d1 := C.CBytes(buf[:n])
+			//d1 := C.CBytes(buf[:n])
 
 			c.lock.Lock()
+			//ret1 := C.nghttp2_session_mem_recv(c.session,
+			//	(*C.uchar)(d1), C.size_t(n))
 			ret1 := C.nghttp2_session_mem_recv(c.session,
-				(*C.uchar)(d1), C.size_t(n))
+				(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(n))
 			c.lock.Unlock()
 
-			C.free(d1)
+			//C.free(d1)
 			if int(ret1) < 0 {
 				c.lock.Lock()
 				c.err = fmt.Errorf("sesion recv error: %s",
@@ -209,46 +211,36 @@ func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err
 	if c.err != nil {
 		return nil, http.StatusServiceUnavailable, c.err
 	}
-	nvIndex := 0
-	nvMax := 5
-	nva := C.new_nv_array(C.size_t(nvMax))
-	//log.Printf("%s %s", req.Method, req.RequestURI)
-	setNvArray(nva, nvIndex, ":method", "CONNECT", 0)
-	nvIndex++
-	//setNvArray(nva, nvIndex, ":scheme", "https", 0)
-	//nvIndex++
-	//log.Printf("header authority: %s", req.RequestURI)
-	setNvArray(nva, nvIndex, ":authority", addr, 0)
-	nvIndex++
+	var nv = []C.nghttp2_nv{}
+	nv = append(nv, newNV(":method", "CONNECT"))
+	nv = append(nv, newNV(":authority", addr))
 
 	var dp *dataProvider
-	var cdp *C.nghttp2_data_provider
-	dp, cdp = newDataProvider(c.lock)
+
+	s := &ClientStream{
+		conn:  c,
+		cdp:   C.nghttp2_data_provider{},
+		resch: make(chan *http.Response),
+		errch: make(chan error),
+		lock:  new(sync.Mutex),
+	}
+
+	dp = newDataProvider(unsafe.Pointer(&s.cdp), c.lock, 1)
+	s.dp = dp
 
 	c.lock.Lock()
-	streamID := C.nghttp2_submit_request(c.session, nil,
-		nva.nv, C.size_t(nvIndex), cdp, nil)
+	streamID := C._nghttp2_submit_request(c.session, nil,
+		C.size_t(uintptr(unsafe.Pointer(&nv[0]))), C.size_t(len(nv)), &s.cdp, nil)
 	c.lock.Unlock()
 
-	C.delete_nv_array(nva)
 	if int(streamID) < 0 {
 		return nil, http.StatusServiceUnavailable, fmt.Errorf(
 			"submit request error: %s", C.GoString(C.nghttp2_strerror(streamID)))
 	}
-	if dp != nil {
-		dp.streamID = int(streamID)
-		dp.session = c.session
-	}
+	dp.streamID = int(streamID)
+	dp.session = c.session
+	s.streamID = int(streamID)
 	//log.Println("stream id ", int(streamID))
-	s := &ClientStream{
-		streamID: int(streamID),
-		conn:     c,
-		dp:       dp,
-		cdp:      cdp,
-		resch:    make(chan *http.Response),
-		errch:    make(chan error),
-		lock:     new(sync.Mutex),
-	}
 
 	c.lock.Lock()
 	c.streams[int(streamID)] = s
@@ -262,6 +254,12 @@ func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err
 		return nil, http.StatusServiceUnavailable, err
 	case res := <-s.resch:
 		if res != nil {
+			res.Request = &http.Request{
+				Method:     "CONNECT",
+				RequestURI: addr,
+				URL:        &url.URL{},
+				Host:       addr,
+			}
 			return s, res.StatusCode, nil
 		}
 		//log.Println("wait response, empty response")
@@ -271,23 +269,31 @@ func (c *ClientConn) Connect(addr string) (cs *ClientStream, statusCode int, err
 	}
 }
 
+func newNV(name, value string) C.nghttp2_nv {
+	nv := C.nghttp2_nv{}
+	nameArr := make([]byte, len(name)+1)
+	valueArr := make([]byte, len(value)+1)
+	copy(nameArr, []byte(name))
+	copy(valueArr, []byte(value))
+
+	nv.name = (*C.uchar)(unsafe.Pointer(&nameArr[0]))
+	nv.value = (*C.uchar)(unsafe.Pointer(&valueArr[0]))
+	nv.namelen = C.size_t(len(name))
+	nv.valuelen = C.size_t(len(value))
+	nv.flags = 0
+	return nv
+}
+
 // CreateRequest submit a request and return a http.Response,
 func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
 
-	nvIndex := 0
-	nvMax := 25
-	nva := C.new_nv_array(C.size_t(nvMax))
-	setNvArray(nva, nvIndex, ":method", req.Method, 0)
-	nvIndex++
-	if req.Method != "CONNECT" {
-		setNvArray(nva, nvIndex, ":scheme", "https", 0)
-		nvIndex++
-	}
-	setNvArray(nva, nvIndex, ":authority", req.Host, 0)
-	nvIndex++
+	nv := []C.nghttp2_nv{}
+	nv = append(nv, newNV(":method", req.Method))
+	nv = append(nv, newNV(":scheme", "https"))
+	nv = append(nv, newNV(":authority", req.Host))
 
 	/*
 		:path must starts with "/"
@@ -299,10 +305,7 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 		p = p + "?" + q
 	}
 
-	if req.Method != "CONNECT" {
-		setNvArray(nva, nvIndex, ":path", p, 0)
-		nvIndex++
-	}
+	nv = append(nv, newNV(":path", p))
 
 	//log.Printf("%s http://%s%s", req.Method, req.Host, p)
 	for k, v := range req.Header {
@@ -312,15 +315,23 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 			continue
 		}
 		//log.Printf("header %s: %s", k, v)
-		setNvArray(nva, nvIndex, strings.Title(k), v[0], 0)
-		nvIndex++
+		nv = append(nv, newNV(k, v[0]))
 	}
 
 	var dp *dataProvider
-	var cdp *C.nghttp2_data_provider
+
+	s := &ClientStream{
+		//streamID: int(streamID),
+		conn:  c,
+		resch: make(chan *http.Response),
+		errch: make(chan error),
+		lock:  new(sync.Mutex),
+	}
 
 	if req.Method == "PUT" || req.Method == "POST" || req.Method == "CONNECT" {
-		dp, cdp = newDataProvider(c.lock)
+		s.cdp = C.nghttp2_data_provider{}
+		dp = newDataProvider(unsafe.Pointer(&s.cdp), c.lock, 1)
+		s.dp = dp
 		go func() {
 			io.Copy(dp, req.Body)
 			dp.Close()
@@ -328,32 +339,22 @@ func (c *ClientConn) CreateRequest(req *http.Request) (*http.Response, error) {
 	}
 
 	c.lock.Lock()
-	streamID := C.nghttp2_submit_request(c.session, nil,
-		nva.nv, C.size_t(nvIndex), cdp, nil)
+	streamID := C._nghttp2_submit_request(c.session, nil,
+		C.size_t(uintptr(unsafe.Pointer(&nv[0]))), C.size_t(len(nv)), &s.cdp, nil)
 	c.lock.Unlock()
 
-	C.delete_nv_array(nva)
+	//C.delete_nv_array(nva)
 
 	if int(streamID) < 0 {
 		return nil, fmt.Errorf("submit request error: %s",
 			C.GoString(C.nghttp2_strerror(streamID)))
 	}
-
+	s.streamID = int(streamID)
 	//log.Printf("new stream, id %d", int(streamID))
 
 	if dp != nil {
 		dp.streamID = int(streamID)
 		dp.session = c.session
-	}
-
-	s := &ClientStream{
-		streamID: int(streamID),
-		conn:     c,
-		dp:       dp,
-		cdp:      cdp,
-		resch:    make(chan *http.Response),
-		errch:    make(chan error),
-		lock:     new(sync.Mutex),
 	}
 
 	c.lock.Lock()
@@ -528,14 +529,16 @@ func (c *ServerConn) Run() {
 				break
 			}
 
-			d1 := C.CBytes(buf[:n])
+			//d1 := C.CBytes(buf[:n])
 
 			c.lock.Lock()
+			//ret1 := C.nghttp2_session_mem_recv(c.session,
+			//	(*C.uchar)(d1), C.size_t(n))
 			ret1 := C.nghttp2_session_mem_recv(c.session,
-				(*C.uchar)(d1), C.size_t(n))
+				(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(n))
 			c.lock.Unlock()
 
-			C.free(d1)
+			//C.free(d1)
 			if int(ret1) < 0 {
 				c.lock.Lock()
 				c.err = fmt.Errorf("sesion recv error: %s",

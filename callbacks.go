@@ -23,26 +23,6 @@ const (
 	NGHTTP2_ERR_DEFERRED                  = -508
 )
 
-/*
-// onServerDataRecvCallback callback function for libnghttp2 library
-// want receive data from network.
-//
-//export onServerDataRecvCallback
-func onServerDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer,
-	length C.size_t) C.ssize_t {
-	conn := (*ServerConn)(ptr)
-	buf := make([]byte, int(length))
-	n, err := conn.conn.Read(buf)
-	if err != nil {
-		return -1
-	}
-	cbuf := C.CBytes(buf[:n])
-	defer C.free(cbuf)
-	C.memcpy(data, cbuf, C.size_t(n))
-	return C.ssize_t(n)
-}
-*/
-
 // onServerDataSendCallback callback function for libnghttp2 library
 // want send data to network.
 //
@@ -50,7 +30,7 @@ func onServerDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 func onServerDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 	length C.size_t) C.ssize_t {
 	//log.Println("server data send")
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	buf := C.GoBytes(data, C.int(length))
 	n, err := conn.conn.Write(buf)
 	if err != nil {
@@ -65,7 +45,7 @@ func onServerDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer,
 //export onServerDataChunkRecv
 func onServerDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	data unsafe.Pointer, length C.size_t) C.int {
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
@@ -80,7 +60,7 @@ func onServerDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 //
 //export onServerBeginHeaderCallback
 func onServerBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	var TLS tls.ConnectionState
 	if tlsconn, ok := conn.conn.(*tls.Conn); ok {
 		TLS = tlsconn.ConnectionState()
@@ -113,7 +93,7 @@ func onServerBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 func onServerHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
 	value unsafe.Pointer, valuelen C.int) C.int {
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
@@ -149,7 +129,7 @@ func onServerHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 //export onServerStreamEndCallback
 func onServerStreamEndCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
@@ -169,7 +149,7 @@ func onServerStreamEndCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 //
 //export onServerHeadersDoneCallback
 func onServerHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
@@ -190,8 +170,9 @@ func onServerHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 //
 //export onServerStreamClose
 func onServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
-	conn := (*ServerConn)(ptr)
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
+	//log.Printf("stream %d closed", int(streamID))
 	if !ok {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
@@ -202,18 +183,23 @@ func onServerStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	return NGHTTP2_NO_ERROR
 }
 
-// onDataSourceReadCallback callback function for libnghttp2 library
+// onClientDataSourceReadCallback callback function for libnghttp2 library
 // want read data from data provider source,
 // return NGHTTP2_ERR_DEFERRED will cause data frame defered,
 // application later call nghttp2_session_resume_data will re-quene the data frame
 //
-//export onDataSourceReadCallback
-func onDataSourceReadCallback(ptr unsafe.Pointer,
+//export onClientDataSourceReadCallback
+func onClientDataSourceReadCallback(ptr unsafe.Pointer, streamID C.int,
 	buf unsafe.Pointer, length C.size_t) C.ssize_t {
 	//log.Println("onDataSourceReadCallback begin")
-	dp := (*dataProvider)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
+	s, ok := conn.streams[int(streamID)]
+	if !ok {
+		//log.Println("client dp callback, stream not exists")
+		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+	}
 	gobuf := make([]byte, int(length))
-	n, err := dp.Read(gobuf)
+	n, err := s.dp.Read(gobuf)
 	if err != nil {
 		if err == io.EOF {
 			//log.Println("onDataSourceReadCallback end")
@@ -221,15 +207,54 @@ func onDataSourceReadCallback(ptr unsafe.Pointer,
 		}
 		if err == errAgain {
 			//log.Println("onDataSourceReadCallback end")
-			dp.deferred = true
+			s.dp.deferred = true
 			return NGHTTP2_ERR_DEFERRED
 		}
 		//log.Println("onDataSourceReadCallback end")
 		return NGHTTP2_ERR_CALLBACK_FAILURE
 	}
-	cbuf := C.CBytes(gobuf)
-	defer C.free(cbuf)
-	C.memcpy(buf, cbuf, C.size_t(n))
+	//cbuf := C.CBytes(gobuf)
+	//defer C.free(cbuf)
+	//C.memcpy(buf, cbuf, C.size_t(n))
+	C.memcpy(buf, unsafe.Pointer(&gobuf[0]), C.size_t(n))
+	//log.Println("onDataSourceReadCallback end")
+	return C.ssize_t(n)
+}
+
+// onServerDataSourceReadCallback callback function for libnghttp2 library
+// want read data from data provider source,
+// return NGHTTP2_ERR_DEFERRED will cause data frame defered,
+// application later call nghttp2_session_resume_data will re-quene the data frame
+//
+//export onServerDataSourceReadCallback
+func onServerDataSourceReadCallback(ptr unsafe.Pointer, streamID C.int,
+	buf unsafe.Pointer, length C.size_t) C.ssize_t {
+	//log.Println("onDataSourceReadCallback begin")
+	conn := (*ServerConn)(unsafe.Pointer(uintptr(ptr)))
+	s, ok := conn.streams[int(streamID)]
+	if !ok {
+		//log.Println("server dp callback, stream not exists")
+		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+	}
+	gobuf := make([]byte, int(length))
+	n, err := s.dp.Read(gobuf)
+	if err != nil {
+		if err == io.EOF {
+			//log.Println("onDataSourceReadCallback end")
+			return 0
+		}
+		if err == errAgain {
+			//log.Println("onDataSourceReadCallback end")
+			s.dp.deferred = true
+			return NGHTTP2_ERR_DEFERRED
+		}
+		//log.Println("onDataSourceReadCallback end")
+		return NGHTTP2_ERR_CALLBACK_FAILURE
+	}
+	//cbuf := C.CBytes(gobuf)
+	//defer C.free(cbuf)
+	//C.memcpy(buf, cbuf, C.size_t(n))
+	C.memcpy(buf, unsafe.Pointer(&gobuf[0]), C.size_t(n))
 	//log.Println("onDataSourceReadCallback end")
 	return C.ssize_t(n)
 }
@@ -240,7 +265,7 @@ func onDataSourceReadCallback(ptr unsafe.Pointer,
 func onClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	buf unsafe.Pointer, length C.size_t) C.int {
 	//log.Println("onClientDataChunkRecv begin")
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 	gobuf := C.GoBytes(buf, C.int(length))
 
 	s, ok := conn.streams[int(streamID)]
@@ -266,34 +291,13 @@ func onClientDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 	return C.int(length)
 }
 
-/*
-// onClientDataRecvCallback callback function for libnghttp2 library want read data from network.
-//
-//export onClientDataRecvCallback
-func onClientDataRecvCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
-	//log.Println("data read req", int(size))
-	conn := (*ClientConn)(ptr)
-	buf := make([]byte, int(size))
-	//log.Println(conn.conn.RemoteAddr())
-	n, err := conn.conn.Read(buf)
-	if err != nil {
-		//log.Println(err)
-		return -1
-	}
-	cbuf := C.CBytes(buf)
-	//log.Println("read from network ", n, buf[:n])
-	C.memcpy(data, cbuf, C.size_t(n))
-	return C.ssize_t(n)
-}
-*/
-
 // onClientDataSendCallback callback function for libnghttp2 library want send data to network.
 //
 //export onClientDataSendCallback
 func onClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
 	//log.Println("onClientDataSendCallback begin")
 	//log.Println("data write req ", int(size))
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 	buf := C.GoBytes(data, C.int(size))
 	//log.Println(conn.conn.RemoteAddr())
 	n, err := conn.conn.Write(buf)
@@ -312,7 +316,7 @@ func onClientDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.si
 func onClientBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("onClientBeginHeaderCallback begin")
 	//log.Printf("stream %d begin headers", int(streamID))
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
@@ -343,7 +347,7 @@ func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	value unsafe.Pointer, valuelen C.int) C.int {
 	//log.Println("onClientHeaderCallback begin")
 	//log.Println("header")
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 	goname := string(C.GoBytes(name, namelen))
 	govalue := string(C.GoBytes(value, valuelen))
 
@@ -383,7 +387,7 @@ func onClientHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 func onClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("onClientHeadersDoneCallback begin")
 	//log.Printf("stream %d headers done", int(streamID))
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 	s, ok := conn.streams[int(streamID)]
 	if !ok {
 		//log.Println("onClientHeadersDoneCallback end")
@@ -403,7 +407,7 @@ func onClientHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 func onClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Println("onClientStreamClose begin")
 	//log.Printf("stream %d closed", int(streamID))
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 
 	stream, ok := conn.streams[int(streamID)]
 	if ok {
@@ -421,7 +425,7 @@ func onClientStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 
 //export onClientConnectionCloseCallback
 func onClientConnectionCloseCallback(ptr unsafe.Pointer) {
-	conn := (*ClientConn)(ptr)
+	conn := (*ClientConn)(unsafe.Pointer(uintptr(ptr)))
 	conn.err = io.EOF
 
 	// signal all goroutings exit
