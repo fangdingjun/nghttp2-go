@@ -7,7 +7,6 @@ import "C"
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -198,7 +197,7 @@ func (s *ServerStream) Close() error {
 		s.conn.lock.Unlock()
 
 		if _, ok := s.conn.streams[s.streamID]; ok {
-			log.Printf("send rst stream %d", s.streamID)
+			//log.Printf("send rst stream %d", s.streamID)
 			C.nghttp2_submit_rst_stream(s.conn.session, 0, C.int(s.streamID), 0)
 			delete(s.conn.streams, s.streamID)
 		}
