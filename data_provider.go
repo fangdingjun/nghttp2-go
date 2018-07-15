@@ -144,3 +144,18 @@ func (bp *bodyProvider) Close() error {
 	bp.closed = true
 	return nil
 }
+
+func newNV(name, value string) C.nghttp2_nv {
+	nv := C.nghttp2_nv{}
+	nameArr := make([]byte, len(name)+1)
+	valueArr := make([]byte, len(value)+1)
+	copy(nameArr, []byte(name))
+	copy(valueArr, []byte(value))
+
+	nv.name = (*C.uchar)(unsafe.Pointer(&nameArr[0]))
+	nv.value = (*C.uchar)(unsafe.Pointer(&valueArr[0]))
+	nv.namelen = C.size_t(len(name))
+	nv.valuelen = C.size_t(len(value))
+	nv.flags = 0
+	return nv
+}

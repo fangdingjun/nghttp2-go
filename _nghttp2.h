@@ -7,16 +7,17 @@
 
 #define ARRLEN(x) (sizeof(x) / sizeof(x[0]))
 
-extern ssize_t onClientDataRecvCallback(void *, void *data, size_t);
-extern ssize_t onClientDataSendCallback(void *, void *data, size_t);
+extern ssize_t onDataRecvCallback(void *, void *data, size_t);
+extern ssize_t onDataSendCallback(void *, void *data, size_t);
 extern ssize_t onServerDataSourceReadCallback(void *, int, void *, size_t);
-extern ssize_t onClientDataSourceReadCallback(void *, int, void *, size_t);
-extern int onClientDataChunkRecv(void *, int, void *, size_t);
-extern int onClientBeginHeaderCallback(void *, int);
-extern int onClientHeaderCallback(void *, int, void *, int, void *, int);
-extern int onClientHeadersDoneCallback(void *, int);
-extern int onClientStreamClose(void *, int);
-extern void onClientConnectionCloseCallback(void *user_data);
+extern ssize_t onDataSourceReadCallback(void *, int, void *, size_t);
+extern int onDataChunkRecv(void *, int, void *, size_t);
+extern int onBeginHeaderCallback(void *, int);
+extern int onHeaderCallback(void *, int, void *, int, void *, int);
+extern int onHeadersDoneCallback(void *, int);
+extern int onStreamClose(void *, int);
+extern void onConnectionCloseCallback(void *user_data);
+extern void onStreamEndCallback(void *, int);
 
 int _nghttp2_submit_response(nghttp2_session *sess, int streamid,
                              size_t nv, size_t nvlen, nghttp2_data_provider *dp);
@@ -25,15 +26,7 @@ int _nghttp2_submit_request(nghttp2_session *session, const nghttp2_priority_spe
                             size_t nva, size_t nvlen,
                             const nghttp2_data_provider *data_prd, void *stream_user_data);
 
-extern ssize_t onServerDataRecvCallback(void *, void *data, size_t);
-extern ssize_t onServerDataSendCallback(void *, void *data, size_t);
-extern int onServerDataChunkRecv(void *, int, void *, size_t);
-extern int onServerBeginHeaderCallback(void *, int);
-extern int onServerHeaderCallback(void *, int, void *, int, void *, int);
-extern int onServerStreamEndCallback(void *, int);
-extern int onServerHeadersDoneCallback(void *, int);
-extern int onServerStreamClose(void *, int);
-int send_server_connection_header(nghttp2_session *session);
+int send_connection_header(nghttp2_session *session);
 
 struct nv_array
 {
