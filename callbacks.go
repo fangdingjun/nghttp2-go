@@ -5,12 +5,15 @@ package nghttp2
 */
 import "C"
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
@@ -49,7 +52,7 @@ func onDataSourceReadCallback(ptr unsafe.Pointer, streamID C.int,
 		}
 		if err == errAgain {
 			//log.Println("onDataSourceReadCallback end")
-			s.dp.deferred = true
+			//s.dp.deferred = true
 			return NGHTTP2_ERR_DEFERRED
 		}
 		//log.Println("onDataSourceReadCallback end")
@@ -82,7 +85,7 @@ func onDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 		//log.Println("onDataChunkRecv end")
 		return C.int(length)
 	}
-
+	//log.Println("bp write")
 	n, err := s.bp.Write(gobuf)
 	if err != nil {
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
@@ -118,34 +121,47 @@ func onBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Printf("stream %d begin headers", int(streamID))
 	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
 
-	s, ok := conn.streams[int(streamID)]
-	if !ok {
-		//log.Println("onBeginHeaderCallback end")
-		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+	// client
+	if !conn.isServer {
+		s, ok := conn.streams[int(streamID)]
+		if !ok {
+			//log.Println("onBeginHeaderCallback end")
+			return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+		}
+		var TLS tls.ConnectionState
+		if tlsconn, ok := conn.conn.(*tls.Conn); ok {
+			TLS = tlsconn.ConnectionState()
+		}
+		s.response = &http.Response{
+			Proto:      "HTTP/2",
+			ProtoMajor: 2,
+			ProtoMinor: 0,
+			Header:     make(http.Header),
+			Body:       s.bp,
+			TLS:        &TLS,
+		}
+		return NGHTTP2_NO_ERROR
 	}
-	var TLS tls.ConnectionState
-	if tlsconn, ok := conn.conn.(*tls.Conn); ok {
-		TLS = tlsconn.ConnectionState()
-	}
-	if conn.isServer {
-		s.request = &http.Request{
+
+	// server
+	s := &stream{
+		streamID: int(streamID),
+		conn:     conn,
+		bp: &bodyProvider{
+			buf:  new(bytes.Buffer),
+			lock: new(sync.Mutex),
+		},
+		request: &http.Request{
 			Header:     make(http.Header),
 			Proto:      "HTTP/2",
 			ProtoMajor: 2,
 			ProtoMinor: 0,
-			TLS:        &TLS,
-			Body:       s.bp,
-		}
-		return NGHTTP2_NO_ERROR
+		},
 	}
-	s.response = &http.Response{
-		Proto:      "HTTP/2",
-		ProtoMajor: 2,
-		ProtoMinor: 0,
-		Header:     make(http.Header),
-		Body:       s.bp,
-		TLS:        &TLS,
-	}
+	s.request.Body = s.bp
+
+	conn.streams[int(streamID)] = s
+
 	//log.Println("onBeginHeaderCallback end")
 	return NGHTTP2_NO_ERROR
 }
@@ -157,7 +173,7 @@ func onHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	name unsafe.Pointer, namelen C.int,
 	value unsafe.Pointer, valuelen C.int) C.int {
 	//log.Println("onHeaderCallback begin")
-	//log.Println("header")
+	//log.Printf("header %d", int(streamID))
 	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
 	goname := string(C.GoBytes(name, namelen))
 	govalue := string(C.GoBytes(value, valuelen))
@@ -176,7 +192,16 @@ func onHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 		s.request.Host = govalue
 	case ":path":
 		s.request.RequestURI = govalue
+		u, err := url.Parse(govalue)
+		if err != nil {
+			return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+		}
+		s.request.URL = u
 	case ":status":
+		if s.response == nil {
+			//log.Println("empty response")
+			return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
+		}
 		statusCode, _ := strconv.Atoi(govalue)
 		s.response.StatusCode = statusCode
 		s.response.Status = http.StatusText(statusCode)
@@ -208,7 +233,11 @@ func onHeadersDoneCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 		//log.Println("onHeadersDoneCallback end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
+	s.headersEnd = true
 	if conn.isServer {
+		if s.request.Method == "CONNECT" {
+			go conn.serve(s)
+		}
 		return NGHTTP2_NO_ERROR
 	}
 	select {
@@ -257,5 +286,19 @@ func onConnectionCloseCallback(ptr unsafe.Pointer) {
 
 //export onStreamEndCallback
 func onStreamEndCallback(ptr unsafe.Pointer, streamID C.int) {
+	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
+	stream, ok := conn.streams[int(streamID)]
+	if !ok {
+		return
+	}
+	stream.streamEnd = true
 
+	stream.bp.Close()
+
+	if stream.conn.isServer {
+		if stream.request.Method != "CONNECT" {
+			go conn.serve(stream)
+		}
+		return
+	}
 }

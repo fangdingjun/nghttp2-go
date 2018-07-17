@@ -7,7 +7,6 @@ import "C"
 import (
 	"bytes"
 	"errors"
-	"io"
 	"log"
 	"sync"
 	"time"
@@ -31,7 +30,7 @@ type dataProvider struct {
 // Read read from data provider
 func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
-		log.Println("db read invalid state")
+		log.Println("dp read invalid state")
 		return 0, errors.New("invalid state")
 	}
 	dp.lock.Lock()
@@ -39,6 +38,8 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 
 	n, err = dp.buf.Read(buf)
 	if err != nil && !dp.closed {
+		//log.Println("deferred")
+		dp.deferred = true
 		return 0, errAgain
 	}
 	return
@@ -53,18 +54,20 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
-	if dp.closed {
-		return 0, io.EOF
-	}
+	//if dp.closed {
+	//	return 0, io.EOF
+	//}
 
+	n, err = dp.buf.Write(buf)
 	if dp.deferred {
 		dp.sessLock.Lock()
 		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
 		dp.sessLock.Unlock()
 
+		//log.Println("resume")
 		dp.deferred = false
 	}
-	return dp.buf.Write(buf)
+	return
 }
 
 // Close end to provide data
