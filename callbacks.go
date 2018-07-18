@@ -183,6 +183,12 @@ func onHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 		//log.Println("onHeaderCallback end")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
+	var header http.Header
+	if conn.isServer {
+		header = s.request.Header
+	} else {
+		header = s.response.Header
+	}
 	goname = strings.ToLower(goname)
 	switch goname {
 	case ":method":
@@ -206,16 +212,24 @@ func onHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 		s.response.StatusCode = statusCode
 		s.response.Status = http.StatusText(statusCode)
 	case "content-length":
-		s.response.Header.Add(goname, govalue)
+		header.Add(goname, govalue)
 		n, err := strconv.ParseInt(govalue, 10, 64)
 		if err == nil {
-			s.response.ContentLength = n
+			if conn.isServer {
+				s.request.ContentLength = n
+			} else {
+				s.response.ContentLength = n
+			}
 		}
 	case "transfer-encoding":
-		s.response.Header.Add(goname, govalue)
-		s.response.TransferEncoding = append(s.response.TransferEncoding, govalue)
+		header.Add(goname, govalue)
+		if conn.isServer {
+			s.request.TransferEncoding = append(s.response.TransferEncoding, govalue)
+		} else {
+			s.response.TransferEncoding = append(s.response.TransferEncoding, govalue)
+		}
 	default:
-		s.response.Header.Add(goname, govalue)
+		header.Add(goname, govalue)
 	}
 	//log.Println("onHeaderCallback end")
 	return NGHTTP2_NO_ERROR
