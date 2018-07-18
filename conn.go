@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -110,7 +111,13 @@ func (c *Conn) RoundTrip(req *http.Request) (*http.Response, error) {
 		p = fmt.Sprintf("%s?%s", p, q)
 	}
 	nv = append(nv, newNV(":path", p))
-
+	for k, v := range req.Header {
+		_k := strings.ToLower(k)
+		if _k == "connection" || _k == "proxy-connection" || _k == "transfer-encoding" {
+			continue
+		}
+		nv = append(nv, newNV(k, v[0]))
+	}
 	cdp := C.nghttp2_data_provider{}
 	dp := newDataProvider(unsafe.Pointer(&cdp), c.lock, 1)
 	dp.session = c.session
