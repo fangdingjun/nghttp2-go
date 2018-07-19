@@ -36,7 +36,31 @@ type Conn struct {
 	exitch      chan struct{}
 }
 
-// Server create server side http2 connection
+// Dial connect to addr and create a http2 client Conn
+//
+// the Conn.Run have already called, should not call it again
+func Dial(network, addr string, cfg *tls.Config) (*Conn, error) {
+	nextProto := []string{"h2"}
+	cfg.NextProtos = nextProto
+	conn, err := tls.Dial(network, addr, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.Handshake(); err != nil {
+		return nil, err
+	}
+	state := conn.ConnectionState()
+	if state.NegotiatedProtocol != "h2" {
+		return nil, errors.New("server not support http2")
+	}
+	return Client(conn)
+}
+
+// Server create server side http2 connection on c
+//
+// c must be TLS connection and negotiated for h2
+//
+// the Conn.Run not called, you must run it
 func Server(c net.Conn, handler http.Handler) (*Conn, error) {
 	conn := &Conn{
 		conn:     c,
@@ -59,7 +83,11 @@ func Server(c net.Conn, handler http.Handler) (*Conn, error) {
 	return conn, nil
 }
 
-// Client create client side http2 connection
+// Client create client side http2 connection on c
+//
+// c must be TLS connection and negotiated for h2
+//
+// the Conn.Run have alread called, you should not call it again
 func Client(c net.Conn) (*Conn, error) {
 	conn := &Conn{
 		conn:    c,
@@ -207,7 +235,13 @@ func (c *Conn) submitRequest(nv []C.nghttp2_nv, cdp *C.nghttp2_data_provider) (*
 }
 
 // Connect submit connect request
-func (c *Conn) Connect(addr string) (net.Conn, int, error) {
+//
+// like "CONNECT host:port" on http/1.1
+//
+// statusCode is the http status code the server returned
+//
+// c bounds to the remote host of addr
+func (c *Conn) Connect(addr string) (conn net.Conn, statusCode int, err error) {
 	nv := []C.nghttp2_nv{}
 
 	nv = append(nv, newNV(":method", "CONNECT"))
