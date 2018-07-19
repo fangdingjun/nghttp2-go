@@ -121,16 +121,16 @@ func onBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 	//log.Printf("stream %d begin headers", int(streamID))
 	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
 
+	var TLS tls.ConnectionState
+	if tlsconn, ok := conn.conn.(*tls.Conn); ok {
+		TLS = tlsconn.ConnectionState()
+	}
 	// client
 	if !conn.isServer {
 		s, ok := conn.streams[int(streamID)]
 		if !ok {
 			//log.Println("onBeginHeaderCallback end")
 			return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
-		}
-		var TLS tls.ConnectionState
-		if tlsconn, ok := conn.conn.(*tls.Conn); ok {
-			TLS = tlsconn.ConnectionState()
 		}
 		s.response = &http.Response{
 			Proto:      "HTTP/2",
@@ -156,6 +156,7 @@ func onBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 			Proto:      "HTTP/2",
 			ProtoMajor: 2,
 			ProtoMinor: 0,
+			TLS:        &TLS,
 		},
 	}
 	s.request.Body = s.bp
