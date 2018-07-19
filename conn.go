@@ -27,6 +27,7 @@ type Conn struct {
 	streamCount int
 	closed      bool
 	isServer    bool
+	running     bool
 	handler     http.Handler
 	lock        *sync.Mutex
 	err         error
@@ -227,6 +228,10 @@ func (c *Conn) Connect(addr string) (net.Conn, int, error) {
 
 // Run run the event loop
 func (c *Conn) Run() {
+	if c.running {
+		return
+	}
+	c.running = true
 	defer c.Close()
 
 	go c.readloop()
