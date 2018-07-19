@@ -53,7 +53,9 @@ client example
         t.Fatal(err)
     }
     defer conn.Close()
-
+    if err := conn.Handshake(); err != nil{
+        t.Fatal(err)
+    }
     cstate := conn.ConnectionState()
     if cstate.NegotiatedProtocol != "h2" {
         t.Fatal("no http2 on server")
@@ -77,7 +79,7 @@ client example
     req.Header.Set("user-agent", "go-nghttp2/1.0")
     req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    res, err := h2conn.CreateRequest(req)
+    res, err := h2conn.RoundTrip(req)
     if err != nil {
         t.Fatal(err)
     }
