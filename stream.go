@@ -101,7 +101,7 @@ func (s *stream) Write(buf []byte) (int, error) {
 	if s.closed {
 		return 0, io.EOF
 	}
-	if s.conn.isServer && s.response == nil {
+	if s.conn.isServer && (s.response == nil || s.response.StatusCode == 0) {
 		s.WriteHeader(http.StatusOK)
 	}
 
