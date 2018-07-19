@@ -41,6 +41,14 @@ type Conn struct {
 // the Conn.Run have already called, should not call it again
 func Dial(network, addr string, cfg *tls.Config) (*Conn, error) {
 	nextProto := []string{"h2"}
+	if cfg == nil {
+		_addr := addr
+		h, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			_addr = h
+		}
+		cfg = &tls.Config{ServerName: _addr}
+	}
 	cfg.NextProtos = nextProto
 	conn, err := tls.Dial(network, addr, cfg)
 	if err != nil {
