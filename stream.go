@@ -7,6 +7,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -31,6 +32,9 @@ type stream struct {
 var _ net.Conn = &stream{}
 
 func (s *stream) Read(buf []byte) (int, error) {
+	if s.closed {
+		return 0, io.EOF
+	}
 	if s.bp != nil {
 		return s.bp.Read(buf)
 	}
@@ -38,6 +42,9 @@ func (s *stream) Read(buf []byte) (int, error) {
 }
 
 func (s *stream) WriteHeader(code int) {
+	if s.closed {
+		return
+	}
 	if s.response == nil {
 		s.response = &http.Response{
 			Proto:      "http/2",
@@ -91,6 +98,9 @@ func (s *stream) Header() http.Header {
 }
 
 func (s *stream) Write(buf []byte) (int, error) {
+	if s.closed {
+		return 0, io.EOF
+	}
 	if s.conn.isServer && s.response == nil {
 		s.WriteHeader(http.StatusOK)
 	}
