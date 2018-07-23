@@ -317,6 +317,10 @@ func (c *Conn) serve(s *stream) {
 	if handler == nil {
 		handler = http.DefaultServeMux
 	}
+	s.request.RemoteAddr = c.conn.RemoteAddr().String()
+	if s.request.URL == nil {
+		s.request.URL = &url.URL{}
+	}
 	handler.ServeHTTP(s, s.request)
 	s.Close()
 }
