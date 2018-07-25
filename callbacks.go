@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,8 +161,10 @@ func onBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 		},
 	}
 	s.request.Body = s.bp
-
+	//log.Printf("new stream %d", int(streamID))
 	conn.streams[int(streamID)] = s
+
+	runtime.SetFinalizer(s, (*stream).free)
 
 	//log.Println("onBeginHeaderCallback end")
 	return NGHTTP2_NO_ERROR
@@ -274,6 +277,7 @@ func onStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 	stream, ok := conn.streams[int(streamID)]
 	if ok {
 		go stream.Close()
+		//log.Printf("remove stream %d", int(streamID))
 		//conn.lock.Lock()
 		delete(conn.streams, int(streamID))
 		//go stream.Close()
@@ -291,7 +295,7 @@ func onConnectionCloseCallback(ptr unsafe.Pointer) {
 	conn.err = io.EOF
 
 	// signal all goroutings exit
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		select {
 		case conn.exitch <- struct{}{}:
 		default:

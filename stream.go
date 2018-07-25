@@ -31,6 +31,29 @@ type stream struct {
 
 var _ net.Conn = &stream{}
 
+func (s *stream) free() {
+	//log.Printf("stream free %d", s.streamID)
+	if !s.closed {
+		s.Close()
+	}
+	s.conn = nil
+	if s.dp != nil {
+		s.dp.buf = nil
+		s.dp.lock = nil
+		s.dp.sessLock = nil
+		s.dp.session = nil
+		s.dp = nil
+	}
+	if s.bp != nil {
+		s.bp.buf = nil
+		s.bp.lock = nil
+		s.bp = nil
+	}
+	s.request = nil
+	s.response = nil
+	s.resch = nil
+}
+
 func (s *stream) Read(buf []byte) (int, error) {
 	if s.closed {
 		return 0, io.EOF

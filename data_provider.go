@@ -7,6 +7,7 @@ import "C"
 import (
 	"bytes"
 	"errors"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -51,6 +52,24 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 		log.Println("dp write invalid state")
 		return 0, errors.New("invalid state")
 	}
+
+	// make sure the buffer not too large
+	delay := 10 * time.Millisecond
+	maxBufSize := 1 * 1024 * 1024
+	for {
+		dp.lock.Lock()
+		_len := dp.buf.Len()
+		closed := dp.closed
+		dp.lock.Unlock()
+		if closed {
+			return 0, io.EOF
+		}
+		if _len < maxBufSize {
+			break
+		}
+		time.Sleep(delay)
+	}
+
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
