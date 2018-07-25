@@ -374,48 +374,33 @@ func (c *Conn) errorNotify(err error) {
 }
 
 func (c *Conn) readloop() {
-
-	var ret C.ssize_t
-	var err error
-
-	datach := make(chan []byte)
-	go func() {
-		var n int
-		var err1 error
-		for {
-			select {
-			case <-c.exitch:
-				return
-			default:
-			}
-			buf := make([]byte, 16*1024)
-			n, err1 = c.conn.Read(buf)
-			if err1 != nil {
-				c.errorNotify(err1)
-				break
-			}
-			datach <- buf[:n]
-		}
-	}()
-
+	buf := make([]byte, 16*1024)
 	for {
 		select {
 		case <-c.exitch:
 			return
-		case d := <-datach:
-			c.lock.Lock()
-			if c.closed {
-				c.lock.Unlock()
-				return
-			}
-			ret = C.nghttp2_session_mem_recv(c.session,
-				(*C.uchar)(unsafe.Pointer(&d[0])), C.size_t(len(d)))
+		default:
+		}
+
+		n, err := c.conn.Read(buf)
+		if err != nil {
+			c.errorNotify(err)
+			return
+		}
+
+		c.lock.Lock()
+		if c.closed {
 			c.lock.Unlock()
-			if int(ret) < 0 {
-				err = fmt.Errorf("http2 recv error: %s", C.GoString(C.nghttp2_strerror(C.int(ret))))
-				c.errorNotify(err)
-				return
-			}
+			return
+		}
+
+		ret := C.nghttp2_session_mem_recv(c.session,
+			(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(n))
+		c.lock.Unlock()
+		if int(ret) < 0 {
+			err = fmt.Errorf("http2 recv error: %s", C.GoString(C.nghttp2_strerror(C.int(ret))))
+			c.errorNotify(err)
+			return
 		}
 	}
 }
