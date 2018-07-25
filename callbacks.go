@@ -29,6 +29,12 @@ const (
 	NGHTTP2_ERR_DEFERRED                  = -508
 )
 
+var bufPool = &sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 16*1024)
+	},
+}
+
 // onDataSourceReadCallback callback function for libnghttp2 library
 // want read data from data provider source,
 // return NGHTTP2_ERR_DEFERRED will cause data frame defered,
@@ -44,8 +50,15 @@ func onDataSourceReadCallback(ptr unsafe.Pointer, streamID C.int,
 		//log.Println("client dp callback, stream not exists")
 		return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE
 	}
-	gobuf := make([]byte, int(length))
-	n, err := s.dp.Read(gobuf)
+	//gobuf := make([]byte, int(length))
+	_length := int(length)
+	gobuf := bufPool.Get().([]byte)
+	if len(gobuf) < _length {
+		gobuf = make([]byte, _length)
+	}
+	defer bufPool.Put(gobuf)
+
+	n, err := s.dp.Read(gobuf[:_length])
 	if err != nil {
 		if err == io.EOF {
 			//log.Println("onDataSourceReadCallback end")
