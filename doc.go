@@ -4,7 +4,7 @@ server example
 
 	cert, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 
 	l, err := tls.Listen("tcp", "127.0.0.1:1100", &tls.Config{
@@ -12,7 +12,7 @@ server example
 		NextProtos:   []string{"h2"},
 	})
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 	defer l.Close()
 	addr := l.Addr().String()
@@ -37,7 +37,7 @@ server example
 		}
 		h2conn, err := Server(c, nil)
 		if err != nil {
-			t.Fatal(err)
+			log.Fatal(err)
 		}
 		log.Printf("%+v", h2conn)
 		go h2conn.Run()
@@ -50,20 +50,20 @@ client example
         ServerName: "nghttp2.org",
     })
     if err != nil {
-        t.Fatal(err)
+        log.Fatal(err)
     }
     defer conn.Close()
     if err := conn.Handshake(); err != nil{
-        t.Fatal(err)
+        log.Fatal(err)
     }
     cstate := conn.ConnectionState()
     if cstate.NegotiatedProtocol != "h2" {
-        t.Fatal("no http2 on server")
+        log.Fatal("no http2 on server")
     }
 
     h2conn, err := Client(conn)
     if err != nil {
-        t.Fatal(err)
+        log.Fatal(err)
     }
 
     param := url.Values{}
@@ -81,11 +81,11 @@ client example
 
     res, err := h2conn.RoundTrip(req)
     if err != nil {
-        t.Fatal(err)
+        log.Fatal(err)
     }
 
     if res.StatusCode != http.StatusOK {
-        t.Errorf("expect %d, got %d", http.StatusOK, res.StatusCode)
+        log.Printf("expect %d, got %d", http.StatusOK, res.StatusCode)
     }
     res.Write(os.Stderr)
 
@@ -94,7 +94,7 @@ co-work with net/http example
 
     l, err := net.Listen("tcp", "127.0.0.1:1222")
     if err != nil {
-        t.Fatal(err)
+        log.Fatal(err)
     }
     srv := &http.Server{
         TLSConfig: &tls.Config{
