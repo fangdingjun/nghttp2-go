@@ -352,11 +352,12 @@ func (c *Conn) Close() error {
 		s.Close()
 	}
 
+	c.lock.Lock()
+
 	for n := range c.streams {
 		delete(c.streams, n)
 	}
 
-	c.lock.Lock()
 	C.nghttp2_session_terminate_session(c.session, 0)
 	C.nghttp2_session_del(c.session)
 	c.lock.Unlock()
