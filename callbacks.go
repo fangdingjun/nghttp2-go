@@ -306,14 +306,7 @@ func onStreamClose(ptr unsafe.Pointer, streamID C.int) C.int {
 func onConnectionCloseCallback(ptr unsafe.Pointer) {
 	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
 	conn.err = io.EOF
-
-	// signal all goroutings exit
-	for i := 0; i < 6; i++ {
-		select {
-		case conn.exitch <- struct{}{}:
-		default:
-		}
-	}
+	conn.Close()
 }
 
 //export onStreamEndCallback
