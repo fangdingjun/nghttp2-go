@@ -344,10 +344,16 @@ func (c *Conn) serve(s *stream) {
 
 // Close close the connection
 func (c *Conn) Close() error {
+	c.lock.Lock()
 	if c.closed {
+		c.lock.Unlock()
 		return nil
 	}
 	c.closed = true
+	c.lock.Unlock()
+
+	// stream.Close may require the conn.Lock
+	// so must not hold the lock here
 	for _, s := range c.streams {
 		s.Close()
 	}
