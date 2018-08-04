@@ -99,6 +99,10 @@ func (s *stream) WriteHeader(code int) {
 	s.dp.streamID = s.streamID
 
 	s.conn.lock.Lock()
+	if s.conn.closed {
+		s.conn.lock.Unlock()
+		return
+	}
 	ret := C._nghttp2_submit_response(s.conn.session, C.int(s.streamID),
 		C.size_t(uintptr(unsafe.Pointer(&nv[0]))), C.size_t(len(nv)), &s.cdp)
 	s.conn.lock.Unlock()
