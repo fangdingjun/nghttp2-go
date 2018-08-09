@@ -7,6 +7,7 @@ package nghttp2
 import "C"
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -27,14 +28,14 @@ type Conn struct {
 	session     *C.nghttp2_session
 	streams     map[int]*stream
 	streamCount int
-	closed      bool
 	isServer    bool
 	running     bool
 	handler     http.Handler
 	lock        *sync.Mutex
 	err         error
 	errch       chan error
-	exitch      chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // Dial connect to addr and create a http2 client Conn
@@ -75,21 +76,25 @@ func Server(c net.Conn, handler http.Handler) (*Conn, error) {
 		conn:     c,
 		handler:  handler,
 		errch:    make(chan error),
-		exitch:   make(chan struct{}),
 		lock:     new(sync.Mutex),
 		isServer: true,
 		streams:  make(map[int]*stream),
 	}
+
+	conn.ctx, conn.cancel = context.WithCancel(context.Background())
+
 	//log.Printf("new conn %x", uintptr(unsafe.Pointer(conn)))
 	runtime.SetFinalizer(conn, (*Conn).free)
-	conn.session = C.init_nghttp2_server_session(C.size_t(uintptr(unsafe.Pointer(conn))))
+	conn.session = C.init_nghttp2_server_session(
+		C.size_t(uintptr(unsafe.Pointer(conn))))
 	if conn.session == nil {
 		return nil, errors.New("init server session failed")
 	}
 	ret := C.send_connection_header(conn.session)
 	if int(ret) < 0 {
 		conn.Close()
-		return nil, fmt.Errorf("send settings error: %s", C.GoString(C.nghttp2_strerror(ret)))
+		return nil, fmt.Errorf("send settings error: %s",
+			C.GoString(C.nghttp2_strerror(ret)))
 	}
 	return conn, nil
 }
@@ -103,20 +108,24 @@ func Client(c net.Conn) (*Conn, error) {
 	conn := &Conn{
 		conn:    c,
 		errch:   make(chan error),
-		exitch:  make(chan struct{}),
 		lock:    new(sync.Mutex),
 		streams: make(map[int]*stream),
 	}
+
+	conn.ctx, conn.cancel = context.WithCancel(context.Background())
+
 	//log.Printf("new conn %x", uintptr(unsafe.Pointer(conn)))
 	runtime.SetFinalizer(conn, (*Conn).free)
-	conn.session = C.init_nghttp2_client_session(C.size_t(uintptr(unsafe.Pointer(conn))))
+	conn.session = C.init_nghttp2_client_session(
+		C.size_t(uintptr(unsafe.Pointer(conn))))
 	if conn.session == nil {
 		return nil, errors.New("init server session failed")
 	}
 	ret := C.send_connection_header(conn.session)
 	if int(ret) < 0 {
 		conn.Close()
-		return nil, fmt.Errorf("send settings error: %s", C.GoString(C.nghttp2_strerror(ret)))
+		return nil, fmt.Errorf("send settings error: %s",
+			C.GoString(C.nghttp2_strerror(ret)))
 	}
 	go conn.Run()
 	return conn, nil
@@ -145,13 +154,9 @@ func HTTP2Handler(srv *http.Server, conn *tls.Conn, handler http.Handler) {
 
 func (c *Conn) free() {
 	//log.Printf("free conn %x", uintptr(unsafe.Pointer(c)))
-	if !c.closed {
+	if !c.isClosed() {
 		c.Close()
 	}
-	c.conn = nil
-	c.session = nil
-	c.streams = nil
-	c.lock = nil
 }
 
 // Error return conn error
@@ -188,7 +193,8 @@ func (c *Conn) RoundTrip(req *http.Request) (*http.Response, error) {
 	nv = append(nv, newNV(":path", p))
 	for k, v := range req.Header {
 		_k := strings.ToLower(k)
-		if _k == "connection" || _k == "proxy-connection" || _k == "transfer-encoding" {
+		if _k == "connection" || _k == "proxy-connection" ||
+			_k == "transfer-encoding" {
 			continue
 		}
 		nv = append(nv, newNV(k, v[0]))
@@ -227,20 +233,23 @@ func (c *Conn) RoundTrip(req *http.Request) (*http.Response, error) {
 		s.request = req
 		res.Request = s.request
 		return res, nil
-	case <-c.exitch:
+	case <-c.ctx.Done():
 		return nil, errors.New("connection closed")
 	}
 }
 
-func (c *Conn) submitRequest(nv []C.nghttp2_nv, cdp *C.nghttp2_data_provider) (*stream, error) {
+func (c *Conn) submitRequest(nv []C.nghttp2_nv,
+	cdp *C.nghttp2_data_provider) (*stream, error) {
 
 	c.lock.Lock()
 	ret := C._nghttp2_submit_request(c.session, nil,
-		C.size_t(uintptr(unsafe.Pointer(&nv[0]))), C.size_t(len(nv)), cdp, nil)
+		C.size_t(uintptr(unsafe.Pointer(&nv[0]))),
+		C.size_t(len(nv)), cdp, nil)
 	c.lock.Unlock()
 
 	if int(ret) < 0 {
-		return nil, fmt.Errorf("submit request error: %s", C.GoString(C.nghttp2_strerror(ret)))
+		return nil, fmt.Errorf("submit request error: %s",
+			C.GoString(C.nghttp2_strerror(ret)))
 	}
 	streamID := int(ret)
 	s := &stream{
@@ -252,6 +261,7 @@ func (c *Conn) submitRequest(nv []C.nghttp2_nv, cdp *C.nghttp2_data_provider) (*
 		},
 		resch: make(chan *http.Response),
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if cdp != nil {
 		s.cdp = *cdp
 	}
@@ -291,7 +301,8 @@ func (c *Conn) Connect(addr string) (conn net.Conn, statusCode int, err error) {
 	select {
 	case res := <-s.resch:
 		if res.StatusCode != http.StatusOK {
-			return nil, res.StatusCode, fmt.Errorf("http error code %d", res.StatusCode)
+			return nil, res.StatusCode, fmt.Errorf(
+				"http error code %d", res.StatusCode)
 		}
 		s.request = &http.Request{
 			Method:     "CONNECT",
@@ -301,8 +312,9 @@ func (c *Conn) Connect(addr string) (conn net.Conn, statusCode int, err error) {
 		}
 		res.Request = s.request
 		return s, res.StatusCode, nil
-	case <-c.exitch:
-		return nil, http.StatusServiceUnavailable, errors.New("connection closed")
+	case <-c.ctx.Done():
+		return nil, http.StatusServiceUnavailable,
+			errors.New("connection closed")
 	}
 
 }
@@ -323,7 +335,7 @@ func (c *Conn) Run() {
 		case err := <-c.errch:
 			c.err = err
 			return
-		case <-c.exitch:
+		case <-c.ctx.Done():
 			return
 		}
 	}
@@ -345,11 +357,11 @@ func (c *Conn) serve(s *stream) {
 // Close close the connection
 func (c *Conn) Close() error {
 	c.lock.Lock()
-	if c.closed {
+	if c.isClosed() {
 		c.lock.Unlock()
 		return nil
 	}
-	c.closed = true
+	c.cancel()
 	c.lock.Unlock()
 
 	// stream.Close may require the conn.Lock
@@ -368,7 +380,6 @@ func (c *Conn) Close() error {
 	C.nghttp2_session_del(c.session)
 	c.lock.Unlock()
 
-	close(c.exitch)
 	c.conn.Close()
 	return nil
 }
@@ -383,12 +394,9 @@ func (c *Conn) errorNotify(err error) {
 func (c *Conn) readloop() {
 	buf := make([]byte, 16*1024)
 	for {
-		select {
-		case <-c.exitch:
+		if c.isClosed() {
 			return
-		default:
 		}
-
 		n, err := c.conn.Read(buf)
 		if err != nil {
 			c.errorNotify(err)
@@ -396,16 +404,17 @@ func (c *Conn) readloop() {
 		}
 
 		c.lock.Lock()
-		if c.closed {
+		// check again
+		if c.isClosed() {
 			c.lock.Unlock()
 			return
 		}
-
 		ret := C.nghttp2_session_mem_recv(c.session,
 			(*C.uchar)(unsafe.Pointer(&buf[0])), C.size_t(n))
 		c.lock.Unlock()
 		if int(ret) < 0 {
-			err = fmt.Errorf("http2 recv error: %s", C.GoString(C.nghttp2_strerror(C.int(ret))))
+			err = fmt.Errorf("http2 recv error: %s",
+				C.GoString(C.nghttp2_strerror(C.int(ret))))
 			c.errorNotify(err)
 			return
 		}
@@ -418,16 +427,16 @@ func (c *Conn) writeloop() {
 	var delay = 50 * time.Millisecond
 
 	for {
-		select {
-		case <-c.exitch:
-			return
-		default:
-		}
 		c.lock.Lock()
+		if c.isClosed() {
+			c.lock.Unlock()
+			return
+		}
 		ret = C.nghttp2_session_send(c.session)
 		c.lock.Unlock()
 		if int(ret) < 0 {
-			err = fmt.Errorf("http2 send error: %s", C.GoString(C.nghttp2_strerror(C.int(ret))))
+			err = fmt.Errorf("http2 send error: %s",
+				C.GoString(C.nghttp2_strerror(C.int(ret))))
 			c.errorNotify(err)
 			return
 		}
@@ -439,4 +448,13 @@ func (c *Conn) writeloop() {
 			time.Sleep(delay)
 		}
 	}
+}
+
+func (c *Conn) isClosed() bool {
+	select {
+	case <-c.ctx.Done():
+		return true
+	default:
+	}
+	return false
 }

@@ -6,6 +6,7 @@ package nghttp2
 import "C"
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -115,7 +116,8 @@ func onDataChunkRecv(ptr unsafe.Pointer, streamID C.int,
 // onDataSendCallback callback function for libnghttp2 library want send data to network.
 //
 //export onDataSendCallback
-func onDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer, size C.size_t) C.ssize_t {
+func onDataSendCallback(ptr unsafe.Pointer, data unsafe.Pointer,
+	size C.size_t) C.ssize_t {
 	//log.Println("onDataSendCallback begin")
 	//log.Println("data write req ", int(size))
 	conn := (*Conn)(unsafe.Pointer(uintptr(ptr)))
@@ -177,6 +179,7 @@ func onBeginHeaderCallback(ptr unsafe.Pointer, streamID C.int) C.int {
 			TLS:        &TLS,
 		},
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.request.Body = s.bp
 	//log.Printf("new stream %d", int(streamID))
 	conn.streams[int(streamID)] = s
@@ -245,9 +248,11 @@ func onHeaderCallback(ptr unsafe.Pointer, streamID C.int,
 	case "transfer-encoding":
 		header.Add(goname, govalue)
 		if conn.isServer {
-			s.request.TransferEncoding = append(s.response.TransferEncoding, govalue)
+			s.request.TransferEncoding = append(
+				s.response.TransferEncoding, govalue)
 		} else {
-			s.response.TransferEncoding = append(s.response.TransferEncoding, govalue)
+			s.response.TransferEncoding = append(
+				s.response.TransferEncoding, govalue)
 		}
 	default:
 		header.Add(goname, govalue)

@@ -30,7 +30,8 @@ type dataProvider struct {
 
 // Read read from data provider
 func (dp *dataProvider) Read(buf []byte) (n int, err error) {
-	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+	if dp.buf == nil || dp.lock == nil ||
+		dp.sessLock == nil || dp.session == nil {
 		log.Println("dp read invalid state")
 		return 0, errors.New("invalid state")
 	}
@@ -48,14 +49,15 @@ func (dp *dataProvider) Read(buf []byte) (n int, err error) {
 
 // Write provider data for data provider
 func (dp *dataProvider) Write(buf []byte) (n int, err error) {
-	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+	if dp.buf == nil || dp.lock == nil ||
+		dp.sessLock == nil || dp.session == nil {
 		log.Println("dp write invalid state")
 		return 0, errors.New("invalid state")
 	}
 
 	// make sure the buffer not too large
 	delay := 10 * time.Millisecond
-	maxBufSize := 1 * 1024 * 1024
+	maxBufSize := 4 * 1024
 	for {
 		dp.lock.Lock()
 		_len := dp.buf.Len()
@@ -80,7 +82,8 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 	n, err = dp.buf.Write(buf)
 	if dp.deferred {
 		dp.sessLock.Lock()
-		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+		C.nghttp2_session_resume_data(
+			dp.session, C.int(dp.streamID))
 		dp.sessLock.Unlock()
 
 		//log.Println("resume")
@@ -91,7 +94,8 @@ func (dp *dataProvider) Write(buf []byte) (n int, err error) {
 
 // Close end to provide data
 func (dp *dataProvider) Close() error {
-	if dp.buf == nil || dp.lock == nil || dp.sessLock == nil || dp.session == nil {
+	if dp.buf == nil || dp.lock == nil ||
+		dp.sessLock == nil || dp.session == nil {
 		log.Println("dp close, invalid state")
 		return errors.New("invalid state")
 	}
@@ -105,7 +109,8 @@ func (dp *dataProvider) Close() error {
 	//log.Printf("dp close stream %d", dp.streamID)
 	if dp.deferred {
 		dp.sessLock.Lock()
-		C.nghttp2_session_resume_data(dp.session, C.int(dp.streamID))
+		C.nghttp2_session_resume_data(
+			dp.session, C.int(dp.streamID))
 		dp.sessLock.Unlock()
 
 		dp.deferred = false
@@ -113,7 +118,8 @@ func (dp *dataProvider) Close() error {
 	return nil
 }
 
-func newDataProvider(cdp unsafe.Pointer, sessionLock *sync.Mutex, t int) *dataProvider {
+func newDataProvider(cdp unsafe.Pointer,
+	sessionLock *sync.Mutex, t int) *dataProvider {
 	dp := &dataProvider{
 		buf:      new(bytes.Buffer),
 		lock:     new(sync.Mutex),
