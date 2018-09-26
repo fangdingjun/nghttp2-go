@@ -223,6 +223,9 @@ func (c *Conn) RoundTrip(req *http.Request) (*http.Response, error) {
 			dp.Close()
 		}()
 	}
+
+	s.request = req
+
 	select {
 	case res := <-s.resch:
 		/*
@@ -230,7 +233,6 @@ func (c *Conn) RoundTrip(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("http error code %d", res.StatusCode)
 			}
 		*/
-		s.request = req
 		res.Request = s.request
 		return res, nil
 	case <-c.ctx.Done():
